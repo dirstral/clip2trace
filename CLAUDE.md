@@ -99,6 +99,22 @@ scaffold with it; integrate by hand).
 - If a skill contradicts our docs, **fix our docs/YAML to match the skill** and
   note it in the investigation log.
 
+## MCP tools — prefer them over guessing
+
+Several MCP servers are connected. Reach for them by default for the work below
+instead of working from memory or shelling out:
+
+| Server | Use it for |
+|---|---|
+| `github` | Issues + PRs in `dirstral/clip2trace`: create branches, open/update PRs, request reviews, search code/issues. **Preferred over the `gh` CLI** for the issue/ownership workflow (below) and the branch→PR flow. |
+| `context7` | Pull **current** library/SDK docs before writing code against them — Telethon, opencv, scenedetect, `@sinas/sdk`, React/Vite. Use it even for familiar libs; don't rely on stale recall. |
+| `playwright` | Browser automation / visual checks for the dashboard component (`components/dashboard.jsx`, #19/#20). |
+| `duckduckgo` | Web search backing the `docs/research/` investigation logs (Telegram global-search feasibility, Sinas mechanics). |
+| `sequential-thinking` | Structured multi-step reasoning on hard pipeline / scoring / verification design problems. |
+
+Other personal MCP servers (e.g. Gmail/Calendar/Drive) may also be connected but
+are not part of the clip2trace workflow — ignore them unless explicitly asked.
+
 ## Working conventions
 
 - **Never capitalise the name** — always `clip2trace`, in code, docs, and prose. Guard it: grep for any capitalised spelling of the name and expect zero matches.
@@ -109,7 +125,7 @@ scaffold with it; integrate by hand).
 - **Telegram is risky** — `channels.searchPosts` is user-account only, free-text is metered/paid, flood-waits happen. Always keep the demo/cached/manual fallback; the search function must surface `live_unavailable` explicitly and **never silently fake a live search**.
 - **Never commit secrets or media**: `.env`, `.sinas/`, `*.session`, session strings, Telegram credentials, downloaded media, private datasets. All are gitignored — keep it that way.
 - Prefer **small, testable functions** over one giant handler. If behaviour changes, update tests and docs in the same change.
-- Committing/pushing straight to `main` is acceptable for this project. End commit messages with the trailer:
+- **Never commit or push directly to `main`.** Always work on a feature branch and open a **PR** against `main` (use the `github` MCP — `create_branch`, `create_pull_request`), then let it be reviewed/merged. End every commit message with the trailer:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 
 ## Issue & ownership workflow
@@ -132,6 +148,7 @@ Issues live in `dirstral/clip2trace` (GitHub). Canonical issue source is
 - [ ] No invented Sinas YAML fields; `sinas validate` re-run if the package changed
 - [ ] No "original"/overclaiming language in automated output
 - [ ] Docs/tests updated alongside behaviour changes
+- [ ] Changes are on a feature branch with an open PR (never pushed to `main`)
 
 ## Known gotchas / blockers
 
