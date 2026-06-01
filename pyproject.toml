@@ -28,6 +28,10 @@ dependencies = [
 [project.optional-dependencies]
 # Installed locally for development; in Sinas these map to approved spec.dependencies.
 video = [
+    # PyAV is the self-contained decode path: its manylinux wheel bundles ffmpeg,
+    # so keyframe extraction + shot detection work on minimal workers (no system
+    # libGL/ffmpeg). opencv/scenedetect are the preferred path when present.
+    "av>=11",
     "opencv-python-headless>=4.8",
     "scenedetect>=0.6",
 ]

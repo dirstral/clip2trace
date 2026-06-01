@@ -168,7 +168,7 @@ spec:
             return {
                 "python": sys.version.split()[0],
                 "modules": {m: has_mod(m) for m in
-                            ["cv2", "scenedetect", "imagehash", "PIL",
+                            ["av", "cv2", "scenedetect", "imagehash", "PIL",
                              "numpy", "telethon", "rapidfuzz", "dateutil",
                              "requests"]},
                 "tools": {"ffmpeg": bool(shutil.which("ffmpeg")),
@@ -222,6 +222,38 @@ spec:
                     method = "shot_detection"
                 except Exception as exc:
                     diagnostics.append("shot detection unavailable: %r" % (exc,))
+                if not segments:
+                    try:
+                        import av, numpy as np
+                        c = av.open(video_path)
+                        try:
+                            vs = c.streams.video[0]; tb = vs.time_base
+                            prev = None; cuts = [0.0]; last = 0.0; nxt = 0.0
+                            for fr in c.decode(vs):
+                                tt = float(fr.pts * tb) if fr.pts is not None else last
+                                last = tt
+                                if tt + 1e-9 < nxt:
+                                    continue
+                                nxt = tt + 1.0 / 3.0
+                                a = fr.to_ndarray(format="gray8")
+                                sc = max(1, int(max(a.shape) / 128))
+                                sm = a[::sc, ::sc].astype("float32") / 255.0
+                                if (prev is not None and prev.shape == sm.shape
+                                        and float(np.mean(np.abs(sm - prev))) > 0.3):
+                                    cuts.append(tt)
+                                prev = sm
+                            dur = float(vs.duration * tb) if vs.duration else last
+                        finally:
+                            c.close()
+                        b = sorted(set(cuts + [dur]))
+                        wins = [{"start_sec": round(x, 2), "end_sec": round(y, 2)}
+                                for x, y in zip(b, b[1:]) if y - x > 0.1]
+                        if wins:
+                            segments = windows_to_segments(
+                                wins, 0.4, "scene cut (pyav); candidate reused footage")
+                            method = "shot_detection_pyav"
+                    except Exception as exc2:
+                        diagnostics.append("pyav shot detection unavailable: %r" % (exc2,))
 
             if not segments and duration:
                 t, wins = 0.0, []
@@ -285,6 +317,38 @@ spec:
                             "method": "shot_detection", "implemented": True}
                 except Exception as exc:
                     diagnostics.append("shot detection unavailable: %r" % (exc,))
+                try:
+                    import av, numpy as np
+                    c = av.open(video_path)
+                    try:
+                        vs = c.streams.video[0]; tb = vs.time_base
+                        prev = None; cuts = [0.0]; last = 0.0; nxt = 0.0
+                        for fr in c.decode(vs):
+                            tt = float(fr.pts * tb) if fr.pts is not None else last
+                            last = tt
+                            if tt + 1e-9 < nxt:
+                                continue
+                            nxt = tt + 1.0 / 3.0
+                            a = fr.to_ndarray(format="gray8")
+                            sc = max(1, int(max(a.shape) / 128))
+                            sm = a[::sc, ::sc].astype("float32") / 255.0
+                            if (prev is not None and prev.shape == sm.shape
+                                    and float(np.mean(np.abs(sm - prev))) > 0.3):
+                                cuts.append(tt)
+                            prev = sm
+                        dur = float(vs.duration * tb) if vs.duration else last
+                    finally:
+                        c.close()
+                    b = sorted(set(cuts + [dur]))
+                    wins = [{"start_sec": round(x, 2), "end_sec": round(y, 2)}
+                            for x, y in zip(b, b[1:]) if y - x > 0.1]
+                    if wins:
+                        return {"segments": windows_to_segments(
+                                    wins, 0.4, "scene cut (pyav); candidate reused footage"),
+                                "method": "shot_detection_pyav",
+                                "implemented": True, "diagnostics": diagnostics}
+                except Exception as exc2:
+                    diagnostics.append("pyav shot detection unavailable: %r" % (exc2,))
 
             if duration:
                 t, wins = 0.0, []
@@ -344,34 +408,114 @@ spec:
             diagnostics = []
 
             # #10 visual: keyframes -> perceptual hashes (full + center-crop).
+            # Decode with OpenCV if present, else PyAV (bundles ffmpeg; no system
+            # libGL). Hash with Pillow+imagehash only (no OpenCV needed).
+            keyframes_rgb = []
             if video_path and start is not None and end is not None:
+                s, e, n = float(start), float(end), 3
+                step = (e - s) / (n + 1)
+                targets = [s + step * i for i in range(1, n + 1)]
                 try:
-                    import cv2, imagehash
-                    from PIL import Image
+                    import cv2
                     cap = cv2.VideoCapture(video_path)
                     try:
-                        n = 3
-                        step = (float(end) - float(start)) / (n + 1)
-                        for i in range(1, n + 1):
-                            cap.set(cv2.CAP_PROP_POS_MSEC,
-                                    (float(start) + step * i) * 1000.0)
+                        for t in targets:
+                            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
                             ok, frame = cap.read()
-                            if not ok:
-                                continue
-                            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            phashes.append(str(imagehash.phash(Image.fromarray(rgb))))
-                            h, w = frame.shape[:2]
-                            ch, cw = int(h * 0.6), int(w * 0.6)
-                            y0, x0 = (h - ch) // 2, (w - cw) // 2
-                            crop = cv2.cvtColor(frame[y0:y0 + ch, x0:x0 + cw],
-                                                cv2.COLOR_BGR2RGB)
-                            phashes.append(str(imagehash.phash(Image.fromarray(crop))))
+                            if ok:
+                                keyframes_rgb.append(
+                                    cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                     finally:
                         cap.release()
+                except Exception:
+                    try:
+                        import av
+                        container = av.open(video_path)
+                        try:
+                            vstream = container.streams.video[0]
+                            tb = vstream.time_base
+                            for t in targets:
+                                try:
+                                    container.seek(int(t / tb), stream=vstream,
+                                                   backward=True)
+                                except Exception:
+                                    pass
+                                picked = None
+                                for fr in container.decode(vstream):
+                                    picked = fr
+                                    ft = (float(fr.pts * tb)
+                                          if fr.pts is not None else t)
+                                    if ft >= t:
+                                        break
+                                if picked is not None:
+                                    keyframes_rgb.append(
+                                        picked.to_ndarray(format="rgb24"))
+                        finally:
+                            container.close()
+                    except Exception as exc:
+                        diagnostics.append(
+                            "keyframe extraction unavailable: %r" % (exc,))
+                try:
+                    import imagehash
+                    from PIL import Image
+                    for rgb in keyframes_rgb:
+                        phashes.append(str(imagehash.phash(Image.fromarray(rgb))))
+                        h, w = rgb.shape[:2]
+                        ch, cw = int(h * 0.6), int(w * 0.6)
+                        y0, x0 = (h - ch) // 2, (w - cw) // 2
+                        crop = rgb[y0:y0 + ch, x0:x0 + cw]
+                        phashes.append(str(imagehash.phash(Image.fromarray(crop))))
                 except Exception as exc:
-                    diagnostics.append("keyframe extraction unavailable: %r" % (exc,))
+                    diagnostics.append("hashing unavailable: %r" % (exc,))
 
-            # #11 text: handles, context terms, OCR availability.
+            # #11 OCR: tesseract if present, else Claude vision via the OpenAI
+            # adapter (no system binary). Supplied ocr_text always wins.
+            ocr_available = False
+            if not ocr_text and keyframes_rgb:
+                try:
+                    import importlib
+                    pytess = importlib.import_module("pytesseract")
+                    from PIL import Image
+                    ocr_text = (pytess.image_to_string(
+                        Image.fromarray(keyframes_rgb[0])) or "").strip()
+                    ocr_available = bool(ocr_text)
+                except Exception:
+                    pass
+            if not ocr_text and keyframes_rgb:
+                try:
+                    import base64, io, os, json, urllib.request
+                    from PIL import Image
+                    ctx = context or {}
+                    base = (ctx.get("api_url") or ctx.get("base_url")
+                            or os.environ.get("SINAS_BASE_URL"))
+                    token = ctx.get("access_token")
+                    if base and token:
+                        buf = io.BytesIO()
+                        Image.fromarray(keyframes_rgb[0]).save(buf, format="PNG")
+                        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                        body = json.dumps({"model": "claude-sonnet-4-6",
+                            "max_tokens": 512, "messages": [{"role": "user",
+                            "content": [{"type": "text", "text":
+                                "Transcribe ONLY the visible on-screen text in this "
+                                "video frame, verbatim. If none, reply with nothing."},
+                                {"type": "image_url", "image_url": {"url":
+                                "data:image/png;base64," + b64}}]}]}).encode()
+                        req = urllib.request.Request(
+                            base.rstrip("/") + "/adapters/openai/v1/chat/completions",
+                            data=body, method="POST",
+                            headers={"Authorization": "Bearer " + token,
+                                     "Content-Type": "application/json"})
+                        resp = urllib.request.urlopen(req, timeout=60)
+                        data = json.loads(resp.read())
+                        ocr_text = (data["choices"][0]["message"]["content"]
+                                    or "").strip()
+                        ocr_available = bool(ocr_text)
+                except Exception as exc:
+                    diagnostics.append("llm ocr unavailable: %r" % (exc,))
+            if not ocr_available:
+                ocr_available = bool(ocr_text)
+
+            # #11 text: handles + context terms (OCR text now folded in).
             blob = " ".join([text_hint, caption, ocr_text])
             handles, seen = [], set()
             for m in HANDLE_RE.findall(blob):
@@ -388,14 +532,6 @@ spec:
                 context_terms.append(w)
                 if len(context_terms) >= 8:
                     break
-
-            try:
-                import importlib
-                importlib.import_module("cv2")
-                importlib.import_module("pytesseract")
-                ocr_available = True
-            except Exception:
-                ocr_available = False
 
             return {"segment_id": input_data.get("segment_id"),
                     "keyframe_file_ids": keyframe_file_ids, "phashes": phashes,
@@ -825,6 +961,9 @@ spec:
     - { packageName: rapidfuzz }
     - { packageName: python-dateutil }
     - { packageName: requests }
+    # PyAV bundles ffmpeg in its wheel → self-contained decode on the managed
+    # worker (no system libGL/ffmpeg). opencv/scenedetect are preferred-if-present.
+    - { packageName: av }
     # Video + Telegram deps require admin approval and larger containers; see docs/risks.md:
     - { packageName: opencv-python-headless }
     - { packageName: scenedetect }

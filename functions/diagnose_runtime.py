@@ -26,7 +26,7 @@ def handler(input_data, context):
         free = shutil.disk_usage(tmp).free
     except Exception:
         free = None
-    modules = ["cv2", "scenedetect", "imagehash", "PIL", "numpy",
+    modules = ["av", "cv2", "scenedetect", "imagehash", "PIL", "numpy",
                "telethon", "rapidfuzz", "dateutil", "requests"]
     return {
         "python": sys.version.split()[0],

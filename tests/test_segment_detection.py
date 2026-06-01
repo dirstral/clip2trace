@@ -93,3 +93,56 @@ def test_real_shot_detection(tmp_path):
     out = _load("detect_source_segments").handler(
         {"job_id": "j", "video_path": path}, {})
     assert out["implemented"] and out["method"] == "shot_detection"
+
+
+def _write_two_scene_av(path, av, np, per=20, size=(64, 48), fps=10):
+    w, h = size
+    with av.open(path, mode="w") as c:
+        st = c.add_stream("mpeg4", rate=fps)
+        st.width, st.height, st.pix_fmt = w, h, "yuv420p"
+        for val in (0, 255):
+            for _ in range(per):
+                fr = av.VideoFrame.from_ndarray(
+                    np.full((h, w, 3), val, dtype=np.uint8), format="rgb24")
+                for p in st.encode(fr):
+                    c.mux(p)
+        for p in st.encode():
+            c.mux(p)
+
+
+def test_pyav_keyframe_extraction(tmp_path):
+    av = pytest.importorskip("av")
+    np = pytest.importorskip("numpy")
+    from clip2trace.video import _extract_keyframes_av, phash_of_frame
+    path = str(tmp_path / "av.mp4")
+    _write_two_scene_av(path, av, np)
+    frames = _extract_keyframes_av(path, 0.3, 3.5, n=3)
+    assert frames, "PyAV returned no frames"
+    hashes = [phash_of_frame(f) for f in frames]
+    assert all(h and int(h, 16) >= 0 for h in hashes)  # valid hex, no opencv
+
+
+def test_pyav_shot_detector_finds_cut(tmp_path):
+    av = pytest.importorskip("av")
+    np = pytest.importorskip("numpy")
+    from clip2trace.video import _detect_shots_av
+    path = str(tmp_path / "av2.mp4")
+    _write_two_scene_av(path, av, np)
+    wins = _detect_shots_av(path)
+    assert len(wins) >= 2, f"expected a detected cut, got {wins}"
+
+
+def test_phash_is_cv2_free():
+    np = pytest.importorskip("numpy")
+    import sys
+    from clip2trace.video import phash_of_frame, center_crop_phash
+    saved = sys.modules.get("cv2")
+    sys.modules["cv2"] = None  # simulate opencv unavailable on the worker
+    try:
+        frame = np.random.randint(0, 255, (48, 64, 3), dtype=np.uint8)
+        assert phash_of_frame(frame) and center_crop_phash(frame)
+    finally:
+        if saved is not None:
+            sys.modules["cv2"] = saved
+        else:
+            sys.modules.pop("cv2", None)

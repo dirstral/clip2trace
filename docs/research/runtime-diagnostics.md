@@ -75,16 +75,23 @@ reload reported all modules `false`, so the reload step is required after instal
 **Key takeaways:**
 - After install you **must click "Reload Workers"** for declared deps to load into
   the worker pool (first probe showed all `false`; after reload, 7/9 import).
-- The pipeline runs end-to-end in demo mode regardless — every step has a
-  dependency-free fallback — and now also does *real* phashing + fuzzy text
-  scoring on-instance.
-- Only **opencv/scenedetect** (and ffmpeg/tesseract tools) remain unavailable, so
-  on-instance *video frame extraction* isn't active yet.
+- Sinas workers accept **pip packages only** — there is no supported way to add
+  system libs (`libGL`) or binaries (`ffmpeg`/`tesseract`) to the managed image
+  (docs `admin/system.md`, `functions.md`). So `cv2`/`scenedetect` (which need
+  `libGL`) and `ffmpeg`/`tesseract` can't be self-served.
+- **Resolution (full pipeline, pip-only):** clip2trace now decodes via **PyAV**
+  (`av` — its wheel bundles ffmpeg, no system libs), detects shots via a
+  **PyAV+numpy** frame-diff detector, hashes via **Pillow+imagehash+numpy**, and
+  does OCR via **Claude vision** through the OpenAI adapter (no tesseract binary).
+  So the entire real-video pipeline runs on the managed worker with the
+  pip-installable deps that already load. opencv/scenedetect/tesseract stay as the
+  *preferred* path when present.
 
-**Follow-ups (#3 → tracked in #33, infra/Ark):** make `cv2`/`scenedetect`
-importable in the worker (add `libGL`/system libs or a heavier worker image), and
-add `ffmpeg`/`tesseract` if real on-instance decode/OCR is wanted. Not blockers for
-the demo.
+**Follow-up (#33, OPTIONAL acceleration — operator-only):** if the Sinas/WeAreBrain
+operator ever adds `libGL`+opencv/scenedetect and `ffmpeg`/`tesseract` to the
+managed worker image, clip2trace uses them automatically for faster native
+decode/shot-detection/OCR. **Not required** — the pip-only path above is the
+supported, working route.
 
 Documented container ceilings (design against these): **512 MB RAM, 1 GB disk,
 100 MB `/tmp` (confirmed), 300 s timeout.**

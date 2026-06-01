@@ -5,12 +5,13 @@ generate_telegram_queries (and Ark's #13 global search):
   segment_id, keyframe_file_ids[], phashes[], ocr_text, visible_handles[],
   context_terms[], ocr_available.
 
-Visual (#10): when a `video_path` + window is given and OpenCV is present,
-extract keyframes and compute full-frame + center-crop perceptual hashes. When
+Visual (#10): when a `video_path` + window is given, extract keyframes (OpenCV
+or PyAV — PyAV bundles ffmpeg so it runs on the managed worker) and compute
+full-frame + center-crop perceptual hashes (Pillow+imagehash, no OpenCV). When
 phashes are supplied directly (demo/cached), pass them through.
-Text (#11): regex @handle extraction, context-term derivation, OCR-availability
-check. Real OCR text is supplied via `ocr_text` (the OCR upgrade is #27); we
-degrade gracefully when OCR libs are absent.
+Text (#11): regex @handle extraction + context-term derivation, plus on-instance
+OCR (tesseract if present, else Claude vision via the platform LLM); supplied
+`ocr_text` always wins. Degrades gracefully when nothing is available.
 """
 
 from __future__ import annotations
@@ -26,17 +27,6 @@ _STOPWORDS = {
 }
 
 
-def _ocr_available() -> bool:
-    """True only if both an image backend and an OCR engine are importable."""
-    try:
-        import importlib
-        importlib.import_module("cv2")
-        importlib.import_module("pytesseract")
-        return True
-    except Exception:
-        return False
-
-
 def handler(input_data, context):
     input_data = input_data or {}
     if not input_data.get("job_id") or not input_data.get("segment_id"):
@@ -50,13 +40,16 @@ def handler(input_data, context):
     video_path = input_data.get("video_path")
     start, end = input_data.get("start_sec"), input_data.get("end_sec")
     diagnostics = []
+    ocr_available = False
+    frames = []
 
     # --- #10 visual: extract keyframes -> perceptual hashes when possible. ---
     if video_path and start is not None and end is not None:
         try:
             from clip2trace.video import (extract_keyframes, phash_of_frame,
                                           center_crop_phash)
-            for frame in extract_keyframes(video_path, float(start), float(end)):
+            frames = extract_keyframes(video_path, float(start), float(end))
+            for frame in frames:
                 h = phash_of_frame(frame)
                 if h:
                     phashes.append(h)
@@ -66,7 +59,27 @@ def handler(input_data, context):
         except Exception as exc:
             diagnostics.append(f"keyframe extraction unavailable: {exc!r}")
 
+    # --- #11 OCR: real on-screen text (tesseract -> Claude vision). Supplied
+    # ocr_text always wins; regex handles below work regardless.
+    if not ocr_text and frames:
+        try:
+            from clip2trace.ocr import ocr_image
+            got = ocr_image(frames[0], context=context)
+            if got:
+                ocr_text = got
+                ocr_available = True
+        except Exception as exc:
+            diagnostics.append(f"ocr unavailable: {exc!r}")
+
     # --- #11 text: handles, context terms, OCR availability. ---
+    if not ocr_available:
+        try:
+            import importlib
+            importlib.import_module("pytesseract")
+            ocr_available = True
+        except Exception:
+            ocr_available = bool(ocr_text)
+
     blob = " ".join([text_hint, caption, ocr_text])
     try:
         from clip2trace.telegram_search import (extract_handles,
@@ -97,7 +110,7 @@ def handler(input_data, context):
         "ocr_text": ocr_text,
         "visible_handles": handles,
         "context_terms": context_terms,
-        "ocr_available": _ocr_available(),
+        "ocr_available": ocr_available,
         "diagnostics": diagnostics,
         "implemented": True,
     }
