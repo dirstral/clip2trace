@@ -44,40 +44,46 @@ Notes on the local box (developer machine):
 
 ## Sinas runtime — PROBED on via-10 (2026-06-02, shared pool)
 
-Real `clip2trace/diagnose_runtime` output from the console (execution
-`9df46078-…`):
+Authoritative `clip2trace/diagnose_runtime` output **after clicking "Reload
+Workers"** (console execution `7d9c2424-…`; an initial probe `9df46078-…` before
+reload reported all modules `false`, so the reload step is required after install):
 
 ```json
 {
   "python": "3.11.15",
-  "modules": {"cv2": false, "scenedetect": false, "imagehash": false,
-              "PIL": false, "numpy": false, "telethon": false,
-              "rapidfuzz": false, "dateutil": false, "requests": false},
+  "modules": {"cv2": false, "scenedetect": false, "imagehash": true,
+              "PIL": true, "numpy": true, "telethon": true,
+              "rapidfuzz": true, "dateutil": true, "requests": true},
   "tools": {"ffmpeg": false, "tesseract": false},
   "tmp_dir": "/tmp", "tmp_free_bytes": 104849408,
   "has_access_token": true, "secrets_available": true
 }
 ```
 
-| Capability | Sinas runtime (via-10, measured) | Design implication |
+| Capability | via-10 (measured, post-reload) | Design implication |
 |---|---|---|
 | Python | **3.11.15** | core lib targets >=3.10 ✓ |
 | `/tmp` free | **104,849,408 B = exactly 100 MiB** | confirms the 100 MB `/tmp` cap — chunk/bound everything |
-| `access_token` in context | **true** | functions can call back to the Sinas API |
-| `secrets` in context | **true** (this is a `sharedPool` fn) | Telegram functions correctly get secrets in the trusted pool |
-| ffmpeg / tesseract | **absent** | OCR + decode degrade to regex-handle / supplied-phash fallbacks |
-| numpy/pillow/imagehash/rapidfuzz/requests/dateutil | **not importable in the worker** | declared in `spec.dependencies` + shown under console "Installed Dependencies (9)", but the worker pool had not loaded them at probe time → click **"Reload Workers"** on the Functions page and re-probe |
-| cv2 / scenedetect / telethon | **absent** | heavy deps; may need a larger worker image. Pipeline runs in fallback mode regardless |
+| `access_token` / `secrets` in context | **true / true** (`sharedPool` fn) | functions can call back to Sinas; Telegram fns get secrets in the trusted pool |
+| numpy, Pillow, imagehash | **importable** | real perceptual hashing works on supplied/extracted frames |
+| rapidfuzz | **importable** | real fuzzy text-overlap scoring (not the Jaccard fallback) |
+| telethon | **importable** | live Telegram search is technically available (Ark; still needs a user session + secrets) |
+| requests, dateutil | **importable** | API calls + date parsing work |
+| **cv2 (opencv), scenedetect** | **NOT importable** | shot detection + keyframe *extraction* stay on the uniform-window / supplied-phash fallback. opencv-headless usually needs a system lib (e.g. `libGL`) in the worker image |
+| ffmpeg / tesseract | **absent** | video decode + OCR degrade to fallbacks (regex handles, supplied phashes) |
 
-**Key takeaway:** the install registered all 9 dependencies, but the **function
-workers report none importable** until "Reload Workers" is clicked (follow-up).
-Because every clip2trace step has a dependency-free fallback (see the matrix
-below), the pipeline still executes and returns structured JSON in demo mode with
-zero deps — real perceptual hashing/scoring activates once the light deps load.
+**Key takeaways:**
+- After install you **must click "Reload Workers"** for declared deps to load into
+  the worker pool (first probe showed all `false`; after reload, 7/9 import).
+- The pipeline runs end-to-end in demo mode regardless — every step has a
+  dependency-free fallback — and now also does *real* phashing + fuzzy text
+  scoring on-instance.
+- Only **opencv/scenedetect** (and ffmpeg/tesseract tools) remain unavailable, so
+  on-instance *video frame extraction* isn't active yet.
 
-**Follow-ups (#3):** (1) click "Reload Workers" and re-probe to confirm the light
-deps load; (2) request `ffmpeg`/`tesseract`/a heavier worker image if real video
-decode/OCR is needed on-instance (otherwise fallbacks cover the demo).
+**Follow-ups (#3, infra/Ark):** make `cv2`/`scenedetect` importable in the worker
+(add `libGL`/system libs or a heavier worker image), and add `ffmpeg`/`tesseract`
+if real on-instance decode/OCR is wanted. Not blockers for the demo.
 
 Documented container ceilings (design against these): **512 MB RAM, 1 GB disk,
 100 MB `/tmp` (confirmed), 300 s timeout.**
