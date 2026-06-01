@@ -11,5 +11,32 @@
     "accessible": true,
     "source_query": "@demo_channel",
     "phashes": ["c3e1c3e1c3e1c3e1"]
+  },
+  {
+    "candidate_id": "cand_demo_2",
+    "channel": "other_channel",
+    "message_id": 8090,
+    "url": "https://t.me/other_channel/8090",
+    "posted_at": "2026-05-29T19:40:00Z",
+    "caption": "unrelated street scene",
+    "has_media": true,
+    "is_forward": false,
+    "accessible": true,
+    "source_query": "street",
+    "phashes": ["0f0f0f0f0f0f0f0f"]
+  },
+  {
+    "candidate_id": "cand_demo_3",
+    "channel": "reposter_channel",
+    "message_id": 1212,
+    "url": "https://t.me/reposter_channel/1212",
+    "posted_at": "2026-05-25T10:00:00Z",
+    "caption": "LIVE FROM DEMO (reposted)",
+    "has_media": true,
+    "is_forward": true,
+    "forward_origin": "demo_channel",
+    "accessible": false,
+    "source_query": "@demo_channel",
+    "phashes": ["c3e1c3e1c3e1c3e1"]
   }
 ]

@@ -113,4 +113,6 @@ If `sinas validate` rejects any of these, adjust in `sinas-package.yaml`.
 | `sinas preview` | NOT RUN — same |
 | `sinas status` | NOT RUN — same |
 | Management API liveness | NOT RUN — no instance URL/token |
-| Local pytest (core logic) | **24 passed** (`uv run --with pytest pytest`) |
+| Local pytest (core logic) | **60 passed** (`uv run --with pytest pytest`) |
+| Package structure (offline) | `tests/test_package_structure.py` — manifest↔spec + agent/component refs resolve (does NOT confirm field *names*; `sinas validate` still required) |
+| Inline-block runnability (offline) | `tests/test_package_inline_sync.py` — every inline `code:` block execs + runs |

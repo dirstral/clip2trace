@@ -3,6 +3,7 @@ import pytest
 from clip2trace.matching import (
     hamming_distance, phash_similarity, best_frame_similarity,
     text_overlap_score, temporal_alignment_score, matched_frames,
+    cluster_segments, link_candidate_to_segments,
 )
 
 
@@ -48,3 +49,31 @@ def test_temporal_alignment():
 def test_matched_frames_threshold():
     frames = matched_frames(["c3e1"], ["c3e1"], threshold=0.85)
     assert frames and frames[0]["similarity"] == 1.0
+
+
+def test_cluster_segments_groups_repeated_footage():
+    segs = [
+        {"segment_id": "seg_001", "phashes": ["c3e1c3e1c3e1c3e1"]},
+        {"segment_id": "seg_002", "phashes": ["0f0f0f0f0f0f0f0f"]},
+        {"segment_id": "seg_003", "phashes": ["c3e1c3e1c3e1c3e1"]},  # repeat of 001
+    ]
+    clusters = cluster_segments(segs)
+    by_members = sorted(sorted(c["segment_ids"]) for c in clusters)
+    assert ["seg_001", "seg_003"] in by_members
+    assert ["seg_002"] in by_members
+
+
+def test_cluster_segments_without_phashes_are_singletons():
+    clusters = cluster_segments([{"segment_id": "a", "phashes": []},
+                                 {"segment_id": "b", "phashes": []}])
+    assert len(clusters) == 2
+
+
+def test_link_candidate_to_multiple_segments():
+    segs = [
+        {"segment_id": "seg_001", "phashes": ["c3e1c3e1c3e1c3e1"]},
+        {"segment_id": "seg_002", "phashes": ["0f0f0f0f0f0f0f0f"]},
+        {"segment_id": "seg_003", "phashes": ["c3e1c3e1c3e1c3e1"]},
+    ]
+    linked = link_candidate_to_segments(["c3e1c3e1c3e1c3e1"], segs)
+    assert linked == ["seg_001", "seg_003"]

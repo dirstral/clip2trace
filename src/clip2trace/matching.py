@@ -97,3 +97,46 @@ def matched_frames(hashes_a: Sequence[str], hashes_b: Sequence[str],
                 out.append({"segment_frame": i, "candidate_frame": j,
                             "similarity": round(sim, 4)})
     return out
+
+
+def cluster_segments(segments: Sequence[dict],
+                     threshold: float = 0.85) -> List[dict]:
+    """Cluster segments that show the same footage (repeated across the video).
+
+    `segments`: dicts with `segment_id` and `phashes` (hex strings). Greedy
+    single-link clustering on best cross-segment perceptual-hash similarity.
+    Segments without phashes never match and form singleton clusters.
+    Returns [{cluster_id, segment_ids[], phashes[]}].
+    """
+    clusters: List[dict] = []
+    for seg in segments:
+        sid = seg.get("segment_id")
+        ph = list(seg.get("phashes") or [])
+        placed = False
+        for cl in clusters:
+            sim, _, _ = best_frame_similarity(ph, cl["phashes"])
+            if sim >= threshold:
+                cl["segment_ids"].append(sid)
+                cl["phashes"].extend(ph)
+                placed = True
+                break
+        if not placed:
+            clusters.append({"cluster_id": f"cluster_{len(clusters) + 1:03d}",
+                             "segment_ids": [sid], "phashes": list(ph)})
+    return clusters
+
+
+def link_candidate_to_segments(candidate_phashes: Sequence[str],
+                               segments: Sequence[dict],
+                               threshold: float = 0.85) -> List[str]:
+    """segment_ids whose keyframes match one candidate's media.
+
+    Lets a single Telegram candidate link to multiple input-video timestamps.
+    """
+    out: List[str] = []
+    for seg in segments:
+        sim, _, _ = best_frame_similarity(candidate_phashes,
+                                          list(seg.get("phashes") or []))
+        if sim >= threshold:
+            out.append(seg.get("segment_id"))
+    return out

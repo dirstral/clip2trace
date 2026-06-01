@@ -12,6 +12,7 @@ def handler(input_data, context):
     segments = input_data.get("segments") or []
     ranked = input_data.get("ranked_candidates") or []
     mode = input_data.get("mode", "demo")
+    output_format = input_data.get("output_format", "json")
 
     try:
         from clip2trace.report import build_report
@@ -21,7 +22,7 @@ def handler(input_data, context):
         report = {
             "job_id": job_id,
             "summary": ("Likely Telegram source candidates for human "
-                        "verification; not confirmed origins."),
+                        "verification; not confirmed sources."),
             "generated_mode": mode,
             "segments": segments,
             "ranked_candidates": kept,
@@ -32,5 +33,17 @@ def handler(input_data, context):
                 "Confidence scores are automated; verify manually."],
         }
 
-    return {"report_json": report, "report_file_id": None,
-            "summary": report.get("summary", "")}
+    result = {"report_json": report, "report_file_id": None,
+              "summary": report.get("summary", "")}
+
+    if output_format in ("html", "both"):
+        try:
+            from clip2trace.report import render_html
+            result["report_html"] = render_html(report)
+        except Exception:
+            result["report_html"] = (
+                "<!doctype html><html><body><h1>clip2trace provenance report</h1>"
+                "<p>Likely Telegram source candidates for human verification; "
+                "not confirmed sources.</p></body></html>")
+
+    return result

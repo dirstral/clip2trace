@@ -169,7 +169,8 @@ spec:
                 "python": sys.version.split()[0],
                 "modules": {m: has_mod(m) for m in
                             ["cv2", "scenedetect", "imagehash", "PIL",
-                             "numpy", "telethon", "rapidfuzz"]},
+                             "numpy", "telethon", "rapidfuzz", "dateutil",
+                             "requests"]},
                 "tools": {"ffmpeg": bool(shutil.which("ffmpeg")),
                           "tesseract": bool(shutil.which("tesseract"))},
                 "tmp_dir": tmp, "tmp_free_bytes": free,
@@ -595,19 +596,22 @@ spec:
           segments: { type: array, items: { type: object } }
           ranked_candidates: { type: array, items: { type: object } }
           mode: { type: string, default: demo }
+          output_format: { type: string, enum: [json, html, both], default: json }
         required: [job_id]
       code: |
         def handler(input_data, context):
+            import html as _html
             job_id = input_data.get("job_id")
             if not job_id:
                 return {"error": "job_id is required"}
             ranked = input_data.get("ranked_candidates") or []
             kept = [c for c in ranked if not c.get("rejected")]
+            mode = input_data.get("mode", "demo")
             report = {
                 "job_id": job_id,
                 "summary": ("Likely Telegram source candidates for human "
-                            "verification; not confirmed origins."),
-                "generated_mode": input_data.get("mode", "demo"),
+                            "verification; not confirmed sources."),
+                "generated_mode": mode,
                 "segments": input_data.get("segments") or [],
                 "ranked_candidates": kept,
                 "caveats": [
@@ -615,8 +619,40 @@ spec:
                     "A matched post may itself be a repost.",
                     "Private/deleted posts are out of scope.",
                     "Confidence scores are automated; verify manually."]}
-            return {"report_json": report, "report_file_id": None,
-                    "summary": report["summary"]}
+            result = {"report_json": report, "report_file_id": None,
+                      "summary": report["summary"]}
+            if input_data.get("output_format", "json") in ("html", "both"):
+                def esc(x):
+                    return _html.escape(str(x))
+                cards = []
+                for c in kept:
+                    lbl = esc(c.get("confidence_label", "unknown"))
+                    url = c.get("url")
+                    safe = str(url or "").strip()
+                    if safe.lower().startswith(("http://", "https://")):
+                        link = ('<a href="%s" rel="noopener noreferrer">%s</a>'
+                                % (esc(safe), esc(safe)))
+                    elif url:
+                        link = esc(url)
+                    else:
+                        link = "(no link)"
+                    cards.append("<div class='card %s'><h3>%s — %s (%s)</h3>"
+                                 "<p>%s</p></div>" % (
+                                     lbl, esc(c.get("candidate_id")), lbl,
+                                     esc(c.get("confidence", 0)), link))
+                cav = "".join("<li>%s</li>" % esc(x) for x in report["caveats"])
+                result["report_html"] = (
+                    "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+                    "<title>clip2trace provenance report — %s</title></head><body>"
+                    "<h1>clip2trace provenance report</h1>"
+                    "<p>job <code>%s</code> · mode <code>%s</code></p>"
+                    "<p>%s</p><h2>Likely Telegram source candidates</h2>%s"
+                    "<h2>Caveats</h2><ul>%s</ul>"
+                    "<footer>Likely candidates for human verification — not "
+                    "confirmed sources.</footer></body></html>" % (
+                        esc(job_id), esc(job_id), esc(mode), esc(report["summary"]),
+                        ("\n".join(cards) or "<p>No candidates retained.</p>"), cav))
+            return result
 
   skills:
     - namespace: clip2trace
