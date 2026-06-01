@@ -125,8 +125,7 @@ are not part of the clip2trace workflow — ignore them unless explicitly asked.
 - **Telegram is risky** — `channels.searchPosts` is user-account only, free-text is metered/paid, flood-waits happen. Always keep the demo/cached/manual fallback; the search function must surface `live_unavailable` explicitly and **never silently fake a live search**.
 - **Never commit secrets or media**: `.env`, `.sinas/`, `*.session`, session strings, Telegram credentials, downloaded media, private datasets. All are gitignored — keep it that way.
 - Prefer **small, testable functions** over one giant handler. If behaviour changes, update tests and docs in the same change.
-- **Never commit or push directly to `main`.** Always work on a feature branch and open a **PR** against `main` (use the `github` MCP — `create_branch`, `create_pull_request`), then let it be reviewed/merged. End every commit message with the trailer:
-  `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
+- **Never commit or push directly to `main`.** Always work on a feature branch and open a **PR** against `main` (use the `github` MCP — `create_branch`, `create_pull_request`), then let it be reviewed/merged.
 
 ## Issue & ownership workflow
 
