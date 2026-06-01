@@ -62,11 +62,46 @@ sinas status
 Fallback if the CLI is unavailable: validate/install via the Management API
 (`POST /api/v1/packages/preview|install`). See [docs/sinas-setup.md](docs/sinas-setup.md).
 
+## Official Sinas skills — use them, they're the source of truth
+
+The Sinas team ships two coding-agent skills at
+[github.com/sinas-platform/skills](https://github.com/sinas-platform/skills).
+They are **more authoritative than anything in this repo** for Sinas mechanics —
+the package YAML field names here were partly inferred, so when they disagree,
+the skill wins.
+
+| Skill | Authoritative for | Consult it before… |
+|---|---|---|
+| `sinas-package-author` | SinasPackage YAML schema, per-resource patterns, naming, manifests, variables/secrets, dependencies, the strict-schema "don't invent fields" rules | editing `sinas-package.yaml` / `sinas-config.yaml`, or debugging `sinas validate` |
+| `sinas-app` | building the React+Vite+TS app that talks to Sinas via `@sinas/sdk` (auth modes, calling queries/functions/chats, when to extend the package) | building/wiring `components/dashboard.jsx` (#19, #20) |
+
+**Install them locally (one time):**
+
+```bash
+bash scripts/setup_sinas_skills.sh   # copies both into .claude/skills/
+```
+
+This drops them into `.claude/skills/` so Claude Code auto-discovers them in this
+project. They are **AGPL-3.0** and this repo is **MIT**, so `.claude/skills/` is
+**gitignored — never commit them.** Also available: `@sinas/cli`
+(`npm i -g @sinas/cli`) and the scaffolder `npx @sinas/create-app` (we did not
+scaffold with it; integrate by hand).
+
+**How to get maximum value:**
+- When a task touches Sinas resources, open/consult the matching skill **first**
+  and follow its exact field names — then reconcile `sinas-package.yaml` and the
+  "inferred-field caveats" in [docs/research/sinas-investigation.md](docs/research/sinas-investigation.md).
+- Treat the skill as the resolver for every "is this the right YAML key?"
+  question, especially for collections/stores/components (our least-certain
+  fields).
+- If a skill contradicts our docs, **fix our docs/YAML to match the skill** and
+  note it in the investigation log.
+
 ## Working conventions
 
 - **Never capitalise the name** — always `clip2trace`, in code, docs, and prose. Guard it: grep for any capitalised spelling of the name and expect zero matches.
 - **Provenance language is non-negotiable.** Never emit "original" / "confirmed original" / "the original post" in automated output. Use "likely Telegram source candidate", "earlier known Telegram appearance", "best candidate found". `src/clip2trace/report.py` sanitises banned phrases and a test asserts no "original" leaks — keep both.
-- **Do not invent Sinas YAML fields.** The strict schema rejects unknown keys. Field names for collections/stores/components are inferred camelCase (no verbatim example exists) — confirm with `sinas validate` and fix `sinas-package.yaml` if rejected. Don't create users, roles, or LLM providers in the package; reference the existing Claude provider via the `PRIMARY_LLM` variable.
+- **Do not invent Sinas YAML fields.** The strict schema rejects unknown keys. Consult the `sinas-package-author` skill (see above) for exact field names — it's the resolver. Field names for collections/stores/components are inferred camelCase (no verbatim example exists) — confirm with the skill + `sinas validate` and fix `sinas-package.yaml` if rejected. Don't create users, roles, or LLM providers in the package; reference the existing Claude provider via the `PRIMARY_LLM` variable.
 - **Functions are sandboxed.** They can only use admin-approved deps (`spec.dependencies`) and **cannot import `src/clip2trace`** at runtime. Keep the YAML inline `code:` blocks self-contained and authoritative; the library is for tests + reference. Secrets (`context["secrets"]`) are only available in `sharedPool: true` functions.
 - **Respect container limits**: 512 MB RAM, 1 CPU, 1 GB disk, 100 MB `/tmp`, 300 s timeout. Chunk/stream video; bound downloads; long steps run async (`/execute/async` → poll `/executions/{id}`).
 - **Telegram is risky** — `channels.searchPosts` is user-account only, free-text is metered/paid, flood-waits happen. Always keep the demo/cached/manual fallback; the search function must surface `live_unavailable` explicitly and **never silently fake a live search**.
