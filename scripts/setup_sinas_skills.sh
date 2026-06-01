@@ -2,9 +2,10 @@
 # Install the official Sinas coding skills into .claude/skills/ so Claude Code
 # auto-discovers them during this project's sessions.
 #
-# The skills (https://github.com/sinas-platform/skills) are AGPL-3.0 while this
-# repo is MIT, so we DO NOT commit them: .claude/skills/ is gitignored. Each
-# developer runs this once locally. Re-runnable (refreshes to latest main).
+# The skills (https://github.com/sinas-platform/skills) are AGPL-3.0; clip2trace
+# is also AGPL-3.0-or-later, so this is license-compatible. We still keep
+# .claude/skills/ gitignored so the skills stay fresh from upstream instead of
+# vendoring stale copies. Each developer runs this once. Re-runnable.
 #
 #   bash scripts/setup_sinas_skills.sh
 

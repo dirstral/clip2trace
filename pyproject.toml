@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Telegram source tracing for reused footage in edited videos."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "dirstral" }]
 
 # Baseline runtime deps. NOTE: inside Sinas, function dependencies must be

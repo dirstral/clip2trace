@@ -45,8 +45,9 @@ htmlcov/
 node_modules/
 npm-debug.log*
 
-# --- Official Sinas skills (AGPL-3.0) — local-only, never commit into this MIT repo ---
-# Installed by scripts/setup_sinas_skills.sh for Claude Code to auto-discover.
+# --- Official Sinas skills (AGPL-3.0; license-compatible with this AGPL repo) ---
+# Kept out of git so they stay fresh from upstream; installed/refreshed by
+# scripts/setup_sinas_skills.sh for Claude Code to auto-discover.
 .claude/skills/
 
 # --- OS / editor ---

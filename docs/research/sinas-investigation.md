@@ -87,10 +87,12 @@ spec:
   `package.json` for when Node is present.
 
 ## D. Skills / license
-- `sinas-platform/skills` is **AGPL-3.0**; our repo is **MIT**. Vendoring the
-  AGPL skills/CLI into this repo would create a license conflict, so we **link**
-  to them in docs rather than copying. The package YAML in this repo was authored
-  using the field names documented in those skills.
+- `sinas-platform/skills` is **AGPL-3.0**. clip2trace is licensed
+  **AGPL-3.0-or-later** (switched from MIT) to be compatible with the Sinas
+  ecosystem, so there is no license conflict. The skills are still installed
+  locally via `scripts/setup_sinas_skills.sh` and gitignored to stay
+  upstream-fresh rather than vendored. The package YAML was authored using the
+  field names documented in those skills.
 
 ## Inferred-field caveats (must confirm with `sinas validate`)
 The package-author skill ships verbatim YAML only for functions, agents,

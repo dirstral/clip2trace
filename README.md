@@ -89,5 +89,7 @@ docs/research/          Investigation logs (Sinas, runtime, Telegram)
 Never commit: `.env`, `.sinas/`, Telegram credentials, session strings, or
 downloaded media. See `.gitignore` and [docs/risks.md](docs/risks.md).
 
-License: MIT (see `LICENSE`). Note the Sinas CLI/skills are AGPL-3.0 and are
-*linked*, not vendored, to avoid a license conflict.
+License: **AGPL-3.0-or-later** (see `LICENSE`) — © 2026 dirstral. clip2trace is
+a Sinas package, and the Sinas platform/CLI/skills are AGPL-3.0, so clip2trace
+matches them. The official Sinas skills are installed locally via
+`scripts/setup_sinas_skills.sh` (kept fresh from upstream, not vendored).

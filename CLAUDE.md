@@ -82,8 +82,10 @@ bash scripts/setup_sinas_skills.sh   # copies both into .claude/skills/
 ```
 
 This drops them into `.claude/skills/` so Claude Code auto-discovers them in this
-project. They are **AGPL-3.0** and this repo is **MIT**, so `.claude/skills/` is
-**gitignored — never commit them.** Also available: `@sinas/cli`
+project. They are **AGPL-3.0** and clip2trace is also **AGPL-3.0-or-later**, so
+they're license-compatible; `.claude/skills/` is still **gitignored** so the
+skills stay fresh from upstream (re-run the script to refresh) rather than
+vendoring stale copies. Also available: `@sinas/cli`
 (`npm i -g @sinas/cli`) and the scaffolder `npx @sinas/create-app` (we did not
 scaffold with it; integrate by hand).
 
@@ -137,4 +139,4 @@ Issues live in `dirstral/clip2trace` (GitHub). Canonical issue source is
 - **No Node/npm here** → `@sinas/cli` can't run locally; use the Management API fallback or a machine with Node.
 - **Sinas package field caveats**: `MAX_VIDEO_MB` is a `text` variable (no numeric type); secret variables can't be conditionally required, so Telegram secrets are `required: false` and enforced at runtime instead.
 - **Telegram session string = full account access.** Generate it once locally with `scripts/bootstrap_telegram_session.py`, store as a Sinas secret, rotate if leaked.
-- The Sinas CLI/skills repo is **AGPL-3.0** while this repo is **MIT** — link to those skills, don't vendor them.
+- clip2trace is **AGPL-3.0-or-later** (matches the Sinas platform/CLI/skills). The official skills are installed locally and gitignored to stay upstream-fresh, not for license reasons.
