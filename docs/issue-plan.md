@@ -56,7 +56,32 @@ area:docs, area:demo, risk, stretch, mvp, blocked, good-first-task`
 29. Add HTML report export — `area:ui, area:docs, stretch`
 30. Add visual embedding similarity — `area:matching, stretch`
 
+## Ownership division (labels `owner:ark` / `owner:ali` / `owner:both`)
+
+Ali does **not** take the Telegram side, so all `area:telegram` work is Ark's.
+Ark also owns the Sinas platform, agents, and coordination/docs; Ali owns the
+video pipeline, matching/scoring, report renderer, and UI. Split 14 / 14 / 2.
+
+### Ark (Telegram + Sinas platform + agents + coordination)
+- M0: #1 Sinas access, #2 CLI, #3 runtime capabilities (incl. Telethon probe), #4 Telegram feasibility
+- M1: #5 package skeleton, #6 collections/stores
+- M2: #11 text clues + visible handles (feeds Telegram queries)
+- M3: #12 session bootstrap, #13 global search, #14 candidate media fetcher
+- M5: #18 agents
+- M6: #23 README, #24 safety/privacy
+- Stretch: #28 third-party Telegram search adapter
+
+### Ali (video pipeline + matching/scoring + report + UI — no Telegram)
+- M1: #7 base function schemas/stubs
+- M2: #8 job creation/state, #9 segment detection, #10 keyframes/fingerprints
+- M4: #15 visual similarity, #16 scoring/ranking, #17 report renderer
+- M5: #19 dashboard skeleton, #20 async wiring/polling
+- Stretch: #25 segment clustering, #26 ASR/transcript, #27 OCR upgrade, #29 HTML report, #30 visual embeddings
+
+### Both
+- #21 demo fixture, #22 final pitch
+
 ## Suggested first issues
-- **A (Sinas/agents/docs/coordination)**: #1, #5, #18 (and #23 done).
-- **Partner (video/Telegram/matching)**: #3, #9, #13.
-- **Both**: #21 demo fixture, #22 pitch.
+- **Ark**: #1 Sinas access → #5 package skeleton → #4/#13 Telegram retrieval.
+- **Ali**: #7 function stubs → #9 segment detection → #15 visual similarity.
+- **Both**: #21 demo fixture, #22 pitch (after the pipelines meet).
