@@ -14,11 +14,15 @@ yaml = pytest.importorskip("yaml")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(ROOT, "sinas-package.yaml")
 
-# manifest resource `type` -> spec section key
+# resource `type` -> spec section key
 TYPE_TO_SECTION = {
     "function": "functions", "agent": "agents", "skill": "skills",
     "collection": "collections", "store": "stores", "component": "components",
 }
+# Only these types are allowed in a manifest's requiredResources (per `sinas
+# validate`). Stores + components are declared in spec and created at install,
+# but are NOT manifest-tracked.
+MANIFEST_TYPES = {"function", "agent", "skill", "collection"}
 EXPECTED_COLLECTIONS = {"input-videos", "source-segments", "keyframes",
                         "telegram-media", "reports", "demo-fixtures"}
 EXPECTED_STORES = {"jobs", "segments", "search-results", "candidate-matches",
@@ -44,6 +48,7 @@ def test_expected_collections_and_stores_declared():
     decl = _declared(_spec())
     assert EXPECTED_COLLECTIONS <= decl["collection"]
     assert EXPECTED_STORES <= decl["store"]
+    assert "dashboard" in decl["component"]
 
 
 def test_manifest_references_resolve_both_ways():
@@ -52,17 +57,19 @@ def test_manifest_references_resolve_both_ways():
     manifest = spec["manifests"][0]
     required = manifest["requiredResources"]
 
-    # every manifest entry resolves to a declared resource of that type
-    manifest_by_type = {t: set() for t in TYPE_TO_SECTION}
+    # every manifest entry uses an allowed type and resolves to a declared resource
+    manifest_by_type = {t: set() for t in MANIFEST_TYPES}
     for r in required:
         t = r["type"]
-        assert t in TYPE_TO_SECTION, f"unknown manifest resource type: {t}"
+        assert t in MANIFEST_TYPES, (
+            f"manifest requiredResources type '{t}' not allowed "
+            f"(must be one of {sorted(MANIFEST_TYPES)})")
         assert r["name"] in decl[t], f"manifest references missing {t}: {r['name']}"
         manifest_by_type[t].add(r["name"])
 
-    # every declared resource appears in the manifest
-    for t, names in decl.items():
-        missing = names - manifest_by_type[t]
+    # every declared resource of a manifest-trackable type appears in the manifest
+    for t in MANIFEST_TYPES:
+        missing = decl[t] - manifest_by_type[t]
         assert not missing, f"declared {t}(s) absent from manifest: {missing}"
 
 

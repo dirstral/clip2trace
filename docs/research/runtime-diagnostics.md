@@ -42,10 +42,16 @@ Notes on the local box (developer machine):
   deps). `telethon` and `opencv`/`scenedetect` are optional extras (not installed).
 - Node/npm are also absent → `@sinas/cli` cannot run here.
 
-## Sinas runtime — PENDING (blocked on instance access)
+## Sinas runtime — deployed (via-10), probe output PENDING
 
-The values that drive design decisions must come from running `diagnose_runtime`
-**on the instance**. Until then, design against the documented container limits:
+`clip2trace/diagnose_runtime` is **deployed** to via-10 (`sinas install`,
+2026-06-01). Capturing its output is the last step: execute it from the **console
+UI** (Functions → `diagnose_runtime` → Run) — the scoped API key currently returns
+`403 Not authorized to execute this function` (see the resource-auth gotcha in
+`docs/research/sinas-investigation.md`), so the management API path can't run it
+yet. Paste the real JSON here once run, then fill the "Sinas runtime" column below.
+
+Until then, design against the documented container limits:
 
 | Capability | Local dev | Sinas runtime (to confirm) | Design implication |
 |---|---|---|---|

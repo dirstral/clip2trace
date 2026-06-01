@@ -806,13 +806,9 @@ spec:
         - { type: collection, namespace: clip2trace, name: telegram-media }
         - { type: collection, namespace: clip2trace, name: reports }
         - { type: collection, namespace: clip2trace, name: demo-fixtures }
-        - { type: store, namespace: clip2trace, name: jobs }
-        - { type: store, namespace: clip2trace, name: segments }
-        - { type: store, namespace: clip2trace, name: search-results }
-        - { type: store, namespace: clip2trace, name: candidate-matches }
-        - { type: store, namespace: clip2trace, name: query-cache }
-        - { type: store, namespace: clip2trace, name: runtime-diagnostics }
-        - { type: component, namespace: clip2trace, name: dashboard }
+      # NOTE: manifest requiredResources only supports agent|collection|function|skill
+      # (per `sinas validate`). Stores + the dashboard component are declared in
+      # spec.stores / spec.components and created at install, but are NOT listed here.
       requiredPermissions:
         - clip2trace.jobs.write:all
         - clip2trace.jobs.read:all
