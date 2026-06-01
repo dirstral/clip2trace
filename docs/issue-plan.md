@@ -65,7 +65,6 @@ video pipeline, matching/scoring, report renderer, and UI. Split 14 / 14 / 2.
 ### Ark (Telegram + Sinas platform + agents + coordination)
 - M0: #1 Sinas access, #2 CLI, #3 runtime capabilities (incl. Telethon probe), #4 Telegram feasibility
 - M1: #5 package skeleton, #6 collections/stores
-- M2: #11 text clues + visible handles (feeds Telegram queries)
 - M3: #12 session bootstrap, #13 global search, #14 candidate media fetcher
 - M5: #18 agents
 - M6: #23 README, #24 safety/privacy
@@ -73,7 +72,7 @@ video pipeline, matching/scoring, report renderer, and UI. Split 14 / 14 / 2.
 
 ### Ali (video pipeline + matching/scoring + report + UI — no Telegram)
 - M1: #7 base function schemas/stubs
-- M2: #8 job creation/state, #9 segment detection, #10 keyframes/fingerprints
+- M2: #8 job creation/state, #9 segment detection, #10 keyframes/fingerprints, #11 text clues + visible handles (mostly video work)
 - M4: #15 visual similarity, #16 scoring/ranking, #17 report renderer
 - M5: #19 dashboard skeleton, #20 async wiring/polling
 - Stretch: #25 segment clustering, #26 ASR/transcript, #27 OCR upgrade, #29 HTML report, #30 visual embeddings
@@ -85,10 +84,10 @@ video pipeline, matching/scoring, report renderer, and UI. Split 14 / 14 / 2.
 The `owner:*` assignment above is the **default plan**, not a lock. Any issue
 labelled `owner:either` can be picked up by whichever partner has spare capacity.
 Because Ali doesn't do Telegram, the floatable pool is **every non-Telegram
-issue** (23 of 30): #1, #2, #5–#10, #15–#27, #29, #30.
+issue** (24 of 30): #1, #2, #5–#11, #15–#27, #29, #30.
 
 **Ark only, NOT floatable:** #3 (runtime capabilities — includes the Telethon
-probe), #4, #11, #12, #13, #14, #28.
+probe), #4, #12, #13, #14, #28.
 If you grab a floatable issue that's assigned to the other person, reassign it on
 GitHub (`gh issue edit <n> --add-assignee <you> --remove-assignee <them>`) so the
 board stays accurate.
