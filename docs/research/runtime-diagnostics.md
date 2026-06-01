@@ -91,16 +91,19 @@ reload reported all modules `false`, so the reload step is required after instal
 the PyAV+numpy shot detector, and PIL/imagehash hashing all run on the managed
 worker. The full visual pipeline is live with **zero infra changes**.
 
-**OCR-via-Claude routing finding:** the OpenAI adapter
-(`POST /adapters/openai/v1/chat/completions`) is reachable, but a **direct-LLM**
-call needs the model registered on the provider — with the Claude provider's
-`default_model: null`, `model:"claude-sonnet-4-6"` returns
-`404 No provider found for model`. Two ways to make Claude-vision OCR resolve:
-1. set the Claude provider's **default model to `claude-sonnet-4-6`** in the console
-   (also closes the #1 gap), or
-2. route via an **agent**: the adapter maps `model:"clip2trace/<agent>"` to that
-   agent. (Until then, OCR falls back to regex-handle extraction — the strongest
-   retrieval signal — so the pipeline is unaffected.)
+**Claude-vision OCR — WORKING (2026-06-02).** Resolved end-to-end:
+- The Claude provider's **default model was set to `claude-sonnet-4-6`** in the
+  console (was `null`), so the adapter resolves the model (`200`).
+- The Sinas OpenAI adapter (`POST /adapters/openai/v1/chat/completions`) routes the
+  model by name but expects **Anthropic-native content blocks** for images: the
+  OpenAI `image_url` shape returns `500`, while
+  `{"type":"image","source":{"type":"base64","media_type":"image/png","data":…}}`
+  returns `200`. `clip2trace.ocr` sends that block.
+- Verified live: `ocr_image(frame, base_url, token)` on a rendered frame returned
+  `"LIVE FROM DEMO @demo_channel"`. OCR still falls back to regex `@handle`
+  extraction if the LLM is unavailable.
+- Routing note: the adapter maps `model:"namespace/name"` to an **agent** instead
+  of a direct-LLM call.
 
 **Follow-up (#33, OPTIONAL acceleration — operator-only):** if the Sinas/WeAreBrain
 operator ever adds `libGL`+opencv/scenedetect and `ffmpeg`/`tesseract` to the

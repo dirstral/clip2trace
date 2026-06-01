@@ -496,10 +496,11 @@ spec:
                         body = json.dumps({"model": "claude-sonnet-4-6",
                             "max_tokens": 512, "messages": [{"role": "user",
                             "content": [{"type": "text", "text":
-                                "Transcribe ONLY the visible on-screen text in this "
-                                "video frame, verbatim. If none, reply with nothing."},
-                                {"type": "image_url", "image_url": {"url":
-                                "data:image/png;base64," + b64}}]}]}).encode()
+                                "Output ONLY the visible on-screen text in this "
+                                "video frame, verbatim. No preamble or markdown. "
+                                "If none, output nothing."},
+                                {"type": "image", "source": {"type": "base64",
+                                 "media_type": "image/png", "data": b64}}]}]}).encode()
                         req = urllib.request.Request(
                             base.rstrip("/") + "/adapters/openai/v1/chat/completions",
                             data=body, method="POST",

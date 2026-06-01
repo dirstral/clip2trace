@@ -32,9 +32,10 @@ def test_claude_vision_request_shape_and_parse():
     assert captured["url"].endswith("/adapters/openai/v1/chat/completions")
     assert captured["headers"]["Authorization"] == "Bearer tok"
     content = captured["body"]["messages"][0]["content"]
-    assert any(p.get("type") == "image_url"
-               and p["image_url"]["url"].startswith("data:image/png;base64,")
-               for p in content)
+    img = [p for p in content if p.get("type") == "image"]
+    assert img and img[0]["source"]["type"] == "base64"
+    assert img[0]["source"]["media_type"] == "image/png"
+    assert img[0]["source"]["data"]  # base64 payload present
 
 
 def test_claude_vision_returns_none_without_runtime():

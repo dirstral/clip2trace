@@ -20,9 +20,9 @@ import io
 from typing import Optional
 
 _OCR_PROMPT = (
-    "Transcribe ONLY the visible on-screen text in this video frame "
-    "(overlays, captions, channel handles, watermarks), verbatim. "
-    "No description or commentary. If there is no text, reply with nothing."
+    "Output ONLY the visible on-screen text in this video frame (overlays, "
+    "captions, channel handles, watermarks), verbatim. No preamble, labels, "
+    "quotes, or markdown. If there is no text, output nothing."
 )
 
 
@@ -62,12 +62,16 @@ def claude_vision_ocr(rgb, *, base_url: Optional[str], token: Optional[str],
     if not b64 or not base_url or not token:
         return None
     url = base_url.rstrip("/") + "/adapters/openai/v1/chat/completions"
+    # The Sinas OpenAI adapter routes the model by name but passes Anthropic-native
+    # content blocks through to the provider. The OpenAI `image_url` shape 500s;
+    # the Anthropic `image` block works. (See docs/research/runtime-diagnostics.md.)
     body = {
         "model": model, "max_tokens": 512,
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": _OCR_PROMPT},
-            {"type": "image_url",
-             "image_url": {"url": "data:image/png;base64," + b64}}]}],
+            {"type": "image", "source": {"type": "base64",
+                                         "media_type": "image/png",
+                                         "data": b64}}]}],
     }
     headers = {"Authorization": "Bearer " + token,
                "Content-Type": "application/json"}
