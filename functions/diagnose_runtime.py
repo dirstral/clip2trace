@@ -20,6 +20,7 @@ def _has_module(name: str) -> bool:
 
 
 def handler(input_data, context):
+    import os
     context = context or {}
     tmp = tempfile.gettempdir()
     try:
@@ -39,4 +40,9 @@ def handler(input_data, context):
         "tmp_free_bytes": free,
         "has_access_token": bool(context.get("access_token")),
         "secrets_available": "secrets" in context,
+        # How does a function address the runtime API? Report env-var NAMES
+        # (never values — avoid leaking secrets) + context keys to find the base
+        # URL for state/collection persistence. See docs/research/runtime-diagnostics.md.
+        "env_keys": sorted(os.environ.keys()),
+        "context_keys": sorted(context.keys()),
     }

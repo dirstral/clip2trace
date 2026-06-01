@@ -176,6 +176,8 @@ spec:
                 "tmp_dir": tmp, "tmp_free_bytes": free,
                 "has_access_token": bool((context or {}).get("access_token")),
                 "secrets_available": "secrets" in (context or {}),
+                "env_keys": sorted(os.environ.keys()),
+                "context_keys": sorted((context or {}).keys()),
             }
 
     - namespace: clip2trace
