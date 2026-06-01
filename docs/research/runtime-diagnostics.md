@@ -51,7 +51,7 @@ reload reported all modules `false`, so the reload step is required after instal
 ```json
 {
   "python": "3.11.15",
-  "modules": {"cv2": false, "scenedetect": false, "imagehash": true,
+  "modules": {"av": true, "cv2": false, "scenedetect": false, "imagehash": true,
               "PIL": true, "numpy": true, "telethon": true,
               "rapidfuzz": true, "dateutil": true, "requests": true},
   "tools": {"ffmpeg": false, "tesseract": false},
@@ -86,6 +86,21 @@ reload reported all modules `false`, so the reload step is required after instal
   So the entire real-video pipeline runs on the managed worker with the
   pip-installable deps that already load. opencv/scenedetect/tesseract stay as the
   *preferred* path when present.
+
+**Confirmed on-instance (2026-06-02):** `av: true` in the worker — so PyAV decode,
+the PyAV+numpy shot detector, and PIL/imagehash hashing all run on the managed
+worker. The full visual pipeline is live with **zero infra changes**.
+
+**OCR-via-Claude routing finding:** the OpenAI adapter
+(`POST /adapters/openai/v1/chat/completions`) is reachable, but a **direct-LLM**
+call needs the model registered on the provider — with the Claude provider's
+`default_model: null`, `model:"claude-sonnet-4-6"` returns
+`404 No provider found for model`. Two ways to make Claude-vision OCR resolve:
+1. set the Claude provider's **default model to `claude-sonnet-4-6`** in the console
+   (also closes the #1 gap), or
+2. route via an **agent**: the adapter maps `model:"clip2trace/<agent>"` to that
+   agent. (Until then, OCR falls back to regex-handle extraction — the strongest
+   retrieval signal — so the pipeline is unaffected.)
 
 **Follow-up (#33, OPTIONAL acceleration — operator-only):** if the Sinas/WeAreBrain
 operator ever adds `libGL`+opencv/scenedetect and `ffmpeg`/`tesseract` to the
