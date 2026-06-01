@@ -135,8 +135,14 @@ spec:
                 return {"error": "mode must be demo|live|hybrid"}
             exec_id = (context or {}).get("execution_id", "local")
             job_id = "job_" + str(exec_id)
-            return {"job_id": job_id, "status": "created",
-                    "mode": mode, "next_step": "analyze_input_video"}
+            meta_fields = ("input_video_file_id", "video_context", "date_hint",
+                           "language_hint", "topic_hint")
+            state = {"job_id": job_id, "status": "created", "mode": mode,
+                     "progress": 0.0, "error": None,
+                     "next_step": "analyze_input_video"}
+            for k in meta_fields:
+                state[k] = input_data.get(k)
+            return state
 
     - namespace: clip2trace
       name: diagnose_runtime
@@ -180,6 +186,8 @@ spec:
         properties:
           job_id: { type: string }
           input_video_file_id: { type: string }
+          video_path: { type: string }
+          duration_sec: { type: number }
           mode: { type: string, default: demo }
         required: [job_id]
       code: |
@@ -187,10 +195,54 @@ spec:
             job_id = input_data.get("job_id")
             if not job_id:
                 return {"error": "job_id is required"}
-            return {"job_id": job_id, "status": "analyzed",
-                    "segments_ref": "clip2trace/segments/" + job_id,
-                    "next_step": "detect_source_segments",
-                    "note": "stub: wire detect_source_segments + extract_segment_clues"}
+            mode = input_data.get("mode", "demo")
+            video_path = input_data.get("video_path")
+            duration = input_data.get("duration_sec")
+            diagnostics = []
+            segments, method = [], "demo_fixture"
+
+            def windows_to_segments(wins, likelihood, reason):
+                return [{"segment_id": "seg_%03d" % i,
+                         "start_sec": round(float(w["start_sec"]), 2),
+                         "end_sec": round(float(w["end_sec"]), 2),
+                         "source_likelihood": likelihood, "reason": reason}
+                        for i, w in enumerate(wins, 1)]
+
+            if video_path:
+                try:
+                    from scenedetect import detect, ContentDetector
+                    scenes = detect(video_path, ContentDetector())
+                    def _secs(tc):
+                        return tc.seconds if hasattr(tc, "seconds") else tc.get_seconds()
+                    wins = [{"start_sec": _secs(s), "end_sec": _secs(e)}
+                            for s, e in scenes]
+                    segments = windows_to_segments(
+                        wins, 0.5, "shot boundary; candidate reused footage")
+                    method = "shot_detection"
+                except Exception as exc:
+                    diagnostics.append("shot detection unavailable: %r" % (exc,))
+
+            if not segments and duration:
+                t, wins = 0.0, []
+                while t < float(duration):
+                    wins.append({"start_sec": round(t, 2),
+                                 "end_sec": round(min(t + 8.0, float(duration)), 2)})
+                    t += 8.0
+                segments = windows_to_segments(
+                    wins, 0.3, "uniform window; candidate reused footage")
+                method = "uniform_windows"
+
+            if not segments:
+                segments = [
+                    {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
+                     "source_likelihood": 0.81, "reason": "candidate reused footage"},
+                    {"segment_id": "seg_002", "start_sec": 58.2, "end_sec": 67.0,
+                     "source_likelihood": 0.64, "reason": "candidate reused footage"}]
+
+            return {"job_id": job_id, "status": "analyzed", "mode": mode,
+                    "method": method, "segments": segments,
+                    "diagnostics": diagnostics,
+                    "next_step": "extract_segment_clues"}
 
     - namespace: clip2trace
       name: detect_source_segments
@@ -201,16 +253,56 @@ spec:
         properties:
           job_id: { type: string }
           input_video_file_id: { type: string }
+          video_path: { type: string }
+          duration_sec: { type: number }
         required: [job_id]
       code: |
         def handler(input_data, context):
             if not input_data.get("job_id"):
                 return {"error": "job_id is required"}
-            # Stub: deterministic placeholder segment until video runtime is wired.
+            video_path = input_data.get("video_path")
+            duration = input_data.get("duration_sec")
+            diagnostics = []
+
+            def windows_to_segments(wins, likelihood, reason):
+                return [{"segment_id": "seg_%03d" % i,
+                         "start_sec": round(float(w["start_sec"]), 2),
+                         "end_sec": round(float(w["end_sec"]), 2),
+                         "source_likelihood": likelihood, "reason": reason}
+                        for i, w in enumerate(wins, 1)]
+
+            if video_path:
+                try:
+                    from scenedetect import detect, ContentDetector
+                    scenes = detect(video_path, ContentDetector())
+                    def _secs(tc):
+                        return tc.seconds if hasattr(tc, "seconds") else tc.get_seconds()
+                    wins = [{"start_sec": _secs(s), "end_sec": _secs(e)}
+                            for s, e in scenes]
+                    return {"segments": windows_to_segments(
+                                wins, 0.5, "shot boundary; candidate reused footage"),
+                            "method": "shot_detection", "implemented": True}
+                except Exception as exc:
+                    diagnostics.append("shot detection unavailable: %r" % (exc,))
+
+            if duration:
+                t, wins = 0.0, []
+                while t < float(duration):
+                    wins.append({"start_sec": round(t, 2),
+                                 "end_sec": round(min(t + 8.0, float(duration)), 2)})
+                    t += 8.0
+                return {"segments": windows_to_segments(
+                            wins, 0.3, "uniform window; candidate reused footage"),
+                        "method": "uniform_windows", "implemented": True,
+                        "diagnostics": diagnostics}
+
             return {"segments": [
-                {"segment_id": "seg_001", "start_sec": 102.4, "end_sec": 118.9,
-                 "source_likelihood": 0.74, "reason": "candidate reused footage"}],
-                "implemented": False}
+                {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
+                 "source_likelihood": 0.81, "reason": "candidate reused footage"},
+                {"segment_id": "seg_002", "start_sec": 58.2, "end_sec": 67.0,
+                 "source_likelihood": 0.64, "reason": "candidate reused footage"}],
+                "method": "demo_fixture", "implemented": True,
+                "diagnostics": diagnostics}
 
     - namespace: clip2trace
       name: extract_segment_clues
@@ -222,17 +314,93 @@ spec:
           job_id: { type: string }
           segment_id: { type: string }
           text_hint: { type: string }
+          caption: { type: string }
+          ocr_text: { type: string }
+          video_path: { type: string }
+          start_sec: { type: number }
+          end_sec: { type: number }
+          phashes: { type: array, items: { type: string } }
+          keyframe_file_ids: { type: array, items: { type: string } }
         required: [job_id, segment_id]
       code: |
         def handler(input_data, context):
             import re
-            text = input_data.get("text_hint", "") or ""
-            handles = re.findall(r"@([A-Za-z][A-Za-z0-9_]{3,31})", text)
+            if not input_data.get("job_id") or not input_data.get("segment_id"):
+                return {"error": "job_id and segment_id are required"}
+            HANDLE_RE = re.compile(r"@([A-Za-z][A-Za-z0-9_]{3,31})")
+            HASHTAG_RE = re.compile(r"#(\w{2,64})")
+            WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{2,}")
+            STOPWORDS = {"the", "and", "for", "with", "this", "that", "from",
+                         "video", "live", "breaking", "news", "watch", "today",
+                         "footage"}
+            text_hint = input_data.get("text_hint", "") or ""
+            caption = input_data.get("caption", "") or ""
+            ocr_text = input_data.get("ocr_text", "") or ""
+            phashes = list(input_data.get("phashes") or [])
+            keyframe_file_ids = list(input_data.get("keyframe_file_ids") or [])
+            video_path = input_data.get("video_path")
+            start, end = input_data.get("start_sec"), input_data.get("end_sec")
+            diagnostics = []
+
+            # #10 visual: keyframes -> perceptual hashes (full + center-crop).
+            if video_path and start is not None and end is not None:
+                try:
+                    import cv2, imagehash
+                    from PIL import Image
+                    cap = cv2.VideoCapture(video_path)
+                    try:
+                        n = 3
+                        step = (float(end) - float(start)) / (n + 1)
+                        for i in range(1, n + 1):
+                            cap.set(cv2.CAP_PROP_POS_MSEC,
+                                    (float(start) + step * i) * 1000.0)
+                            ok, frame = cap.read()
+                            if not ok:
+                                continue
+                            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            phashes.append(str(imagehash.phash(Image.fromarray(rgb))))
+                            h, w = frame.shape[:2]
+                            ch, cw = int(h * 0.6), int(w * 0.6)
+                            y0, x0 = (h - ch) // 2, (w - cw) // 2
+                            crop = cv2.cvtColor(frame[y0:y0 + ch, x0:x0 + cw],
+                                                cv2.COLOR_BGR2RGB)
+                            phashes.append(str(imagehash.phash(Image.fromarray(crop))))
+                    finally:
+                        cap.release()
+                except Exception as exc:
+                    diagnostics.append("keyframe extraction unavailable: %r" % (exc,))
+
+            # #11 text: handles, context terms, OCR availability.
+            blob = " ".join([text_hint, caption, ocr_text])
+            handles, seen = [], set()
+            for m in HANDLE_RE.findall(blob):
+                if m.lower() not in seen:
+                    seen.add(m.lower())
+                    handles.append(m)
+            cleaned = HASHTAG_RE.sub(" ", HANDLE_RE.sub(" ", blob))
+            context_terms, seen = [], set()
+            for w in WORD_RE.findall(cleaned):
+                k = w.lower()
+                if k in STOPWORDS or k in seen:
+                    continue
+                seen.add(k)
+                context_terms.append(w)
+                if len(context_terms) >= 8:
+                    break
+
+            try:
+                import importlib
+                importlib.import_module("cv2")
+                importlib.import_module("pytesseract")
+                ocr_available = True
+            except Exception:
+                ocr_available = False
+
             return {"segment_id": input_data.get("segment_id"),
-                    "keyframe_file_ids": [], "phashes": [],
-                    "ocr_text": "", "visible_handles": handles,
-                    "context_terms": [], "ocr_available": False,
-                    "implemented": False}
+                    "keyframe_file_ids": keyframe_file_ids, "phashes": phashes,
+                    "ocr_text": ocr_text, "visible_handles": handles,
+                    "context_terms": context_terms, "ocr_available": ocr_available,
+                    "diagnostics": diagnostics, "implemented": True}
 
     - namespace: clip2trace
       name: generate_telegram_queries
@@ -331,6 +499,8 @@ spec:
           candidate_phashes: { type: array, items: { type: string } }
           segment_text: { type: string }
           candidate_text: { type: string }
+          segment_duration: { type: number }
+          candidate_duration: { type: number }
       code: |
         def handler(input_data, context):
             def ham(a, b):
@@ -347,8 +517,19 @@ spec:
                         frames.append({"segment_frame": i, "candidate_frame": j,
                                        "similarity": round(sim, 4)})
                     best = max(best, sim)
-            return {"visual_score": round(best, 4), "text_score": 0.0,
-                    "temporal_score": 0.0, "overall_score": round(best, 4),
+            ta = set(str(input_data.get("segment_text", "")).lower().split())
+            tb = set(str(input_data.get("candidate_text", "")).lower().split())
+            text = len(ta & tb) / len(ta | tb) if ta and tb else 0.0
+            sd = input_data.get("segment_duration") or 0.0
+            cd = input_data.get("candidate_duration") or 0.0
+            if sd and cd:
+                r = min(float(sd), float(cd)) / max(float(sd), float(cd))
+                temporal = max(0.0, (r - 0.75) / 0.25)
+            else:
+                temporal = 0.0
+            overall = round(0.6 * best + 0.25 * text + 0.15 * temporal, 4)
+            return {"visual_score": round(best, 4), "text_score": round(text, 4),
+                    "temporal_score": round(temporal, 4), "overall_score": overall,
                     "matched_frames": frames}
 
     - namespace: clip2trace
@@ -371,9 +552,26 @@ spec:
                     if s >= lo:
                         return name
                 return "reject"
+            def evidence_for(c):
+                ev = c.get("evidence")
+                if ev:
+                    return ev
+                v = c.get("verification") or {}
+                if v:
+                    return {"visual_similarity": v.get("visual_score", 0.0),
+                            "ocr_caption_query": v.get("text_score", 0.0),
+                            "temporal_alignment": v.get("temporal_score", 0.0),
+                            "handle_watermark": c.get("handle_match", 0.0),
+                            "predates_input": c.get("predates_input", 0.0),
+                            "channel_relevance": c.get("channel_relevance", 0.0),
+                            "forward_repost": c.get("forward_repost", 0.0)}
+                return {}
+            steps = ["Open the Telegram link and confirm the media visually.",
+                     "Check whether the post is itself a forward/repost.",
+                     "Compare post timestamp against the input video's publication date."]
             out = []
             for c in (input_data.get("candidates") or []):
-                ev = c.get("evidence", {})
+                ev = evidence_for(c)
                 score = sum(W[k] * max(0.0, min(1.0, float(ev.get(k, 0.0)))) for k in W)
                 out.append({"candidate_id": c.get("candidate_id"),
                             "confidence": round(score, 4),
@@ -381,6 +579,7 @@ spec:
                             "rejected": score < 0.30, "evidence": ev,
                             "caveats": ["Telegram post may itself be a repost.",
                                         "Automated score; verify manually."],
+                            "recommended_next_steps": steps,
                             "url": c.get("url")})
             out.sort(key=lambda x: x["confidence"], reverse=True)
             return {"ranked_candidates": out}

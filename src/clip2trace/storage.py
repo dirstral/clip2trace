@@ -10,6 +10,42 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+# Job lifecycle, mirroring schemas.JobStatus. Coarse progress hints per status.
+JOB_STATUS_ORDER = ["created", "analyzing", "searching", "verifying",
+                    "ranking", "reporting", "done", "failed"]
+JOB_PROGRESS = {"created": 0.0, "analyzing": 0.15, "searching": 0.4,
+                "verifying": 0.6, "ranking": 0.8, "reporting": 0.9,
+                "done": 1.0, "failed": 1.0}
+_JOB_META_FIELDS = ("input_video_file_id", "video_context", "date_hint",
+                    "language_hint", "topic_hint")
+
+
+def build_job_state(job_id: str, mode: str = "demo", *, status: str = "created",
+                    error: Optional[str] = None, **metadata: Any) -> Dict[str, Any]:
+    """Assemble a full job-state dict (schemas.Job shape) with a progress hint."""
+    if status not in JOB_PROGRESS:
+        status = "created"
+    state: Dict[str, Any] = {
+        "job_id": job_id, "status": status, "mode": mode,
+        "progress": JOB_PROGRESS[status], "error": error,
+    }
+    for k in _JOB_META_FIELDS:
+        state[k] = metadata.get(k)
+    return state
+
+
+def advance_job_state(state: Dict[str, Any], status: str, *,
+                      error: Optional[str] = None) -> Dict[str, Any]:
+    """Return a copy of `state` moved to `status` (+ progress hint / error)."""
+    new = dict(state)
+    new["status"] = status
+    new["progress"] = JOB_PROGRESS.get(status, new.get("progress", 0.0))
+    if error is not None:
+        new["error"] = error
+    if status == "failed" and error is None and not new.get("error"):
+        new["error"] = "job failed"
+    return new
+
 
 class InMemoryStore:
     """Dict-backed stand-in for a Sinas state store. For tests/demo only."""

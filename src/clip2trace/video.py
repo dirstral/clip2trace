@@ -34,9 +34,11 @@ def detect_shots(video_path: str, threshold: float = 27.0) -> List[dict]:
     except Exception as exc:
         raise RuntimeError(f"scenedetect unavailable: {exc!r}")
 
+    def _secs(tc):  # `.seconds` (newer scenedetect) else get_seconds() (older)
+        return tc.seconds if hasattr(tc, "seconds") else tc.get_seconds()
+
     scenes = detect(video_path, ContentDetector(threshold=threshold))
-    return [{"start_sec": s.get_seconds(), "end_sec": e.get_seconds()}
-            for s, e in scenes]
+    return [{"start_sec": _secs(s), "end_sec": _secs(e)} for s, e in scenes]
 
 
 def uniform_windows(duration_sec: float, window: float = 8.0,
@@ -48,6 +50,34 @@ def uniform_windows(duration_sec: float, window: float = 8.0,
                     "end_sec": round(min(t + window, duration_sec), 2)})
         t += stride
     return out
+
+
+def windows_to_segments(windows: List[dict], *, prefix: str = "seg",
+                        likelihood: float = 0.5,
+                        reason: str = "candidate reused footage") -> List[dict]:
+    """Turn {start_sec,end_sec} windows into SourceSegment-shaped dicts."""
+    return [
+        {"segment_id": f"{prefix}_{i:03d}",
+         "start_sec": round(float(w["start_sec"]), 2),
+         "end_sec": round(float(w["end_sec"]), 2),
+         "source_likelihood": likelihood,
+         "reason": reason}
+        for i, w in enumerate(windows, 1)
+    ]
+
+
+# Deterministic demo segments for fixture/demo mode (no video runtime needed).
+DEMO_SEGMENTS = [
+    {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
+     "source_likelihood": 0.81, "reason": "candidate reused footage"},
+    {"segment_id": "seg_002", "start_sec": 58.2, "end_sec": 67.0,
+     "source_likelihood": 0.64, "reason": "candidate reused footage"},
+]
+
+
+def demo_segments() -> List[dict]:
+    """Copy of the deterministic demo segments."""
+    return [dict(s) for s in DEMO_SEGMENTS]
 
 
 def extract_keyframes(video_path: str, start_sec: float, end_sec: float,

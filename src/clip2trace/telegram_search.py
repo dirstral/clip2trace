@@ -42,6 +42,29 @@ def extract_hashtags(text: str) -> List[str]:
     return out
 
 
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{2,}")
+
+
+def derive_context_terms(text: str, limit: int = 8) -> List[str]:
+    """Pull meaningful free-text terms (for `context` queries) from a blob.
+
+    Strips @handles and #hashtags first (they have their own query families),
+    drops stopwords and tokens shorter than 3 chars, de-duplicates
+    case-insensitively, preserves order, and caps the result at `limit`.
+    """
+    cleaned = HASHTAG_RE.sub(" ", HANDLE_RE.sub(" ", text or ""))
+    seen, out = set(), []
+    for w in _WORD_RE.findall(cleaned):
+        key = w.lower()
+        if key in _STOPWORDS or key in seen:
+            continue
+        seen.add(key)
+        out.append(w)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def generate_queries(clues: Dict) -> List[Dict]:
     """Turn segment clues into a small, ranked Telegram query set.
 
