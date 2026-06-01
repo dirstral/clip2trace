@@ -81,6 +81,17 @@ video pipeline, matching/scoring, report renderer, and UI. Split 14 / 14 / 2.
 ### Both
 - #21 demo fixture, #22 final pitch
 
+## Floatable issues (`owner:either`) — for whoever runs ahead
+The `owner:*` assignment above is the **default plan**, not a lock. Any issue
+labelled `owner:either` can be picked up by whichever partner has spare capacity.
+Because Ali doesn't do Telegram, the floatable pool is **every non-Telegram
+issue** (24 of 30): #1, #2, #3, #5–#10, #15–#27, #29, #30.
+
+**Telegram-locked (Ark only, NOT floatable):** #4, #11, #12, #13, #14, #28.
+If you grab a floatable issue that's assigned to the other person, reassign it on
+GitHub (`gh issue edit <n> --add-assignee <you> --remove-assignee <them>`) so the
+board stays accurate.
+
 ## Suggested first issues
 - **Ark**: #1 Sinas access → #5 package skeleton → #4/#13 Telegram retrieval.
 - **Ali**: #7 function stubs → #9 segment detection → #15 visual similarity.
