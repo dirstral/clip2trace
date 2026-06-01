@@ -94,6 +94,28 @@ spec:
   upstream-fresh rather than vendored. The package YAML was authored using the
   field names documented in those skills.
 
+### SDK licenses (checked 2026-06-01) and why we are AGPL-3.0
+| Component | Source | License | Bundled/distributed by clip2trace? |
+|---|---|---|---|
+| `@sinas/sdk` v0.7.0 (JS, used by the dashboard) | `sinas-platform/sinas-js` (npm registry `license` field) | **AGPL-3.0** | **Yes**, if the dashboard is shipped as a build that bundles the SDK |
+| `@sinas/cli`, `@sinas/create-app` | `sinas-platform/skills` monorepo | AGPL-3.0 | No — dev tooling only |
+| `sinas` (Python SDK, preinstalled in functions) | sinas-platform; runs server-side in the platform sandbox | Unconfirmed (likely AGPL) | No — not redistributed by us; the public PyPI `sinas` v0.2.0 (`github.com/sinas/sinas-sdk`, `docs.sinas.ai`, MIT) is a **namesake**, NOT this SDK — do not rely on it |
+
+**Decision rationale.** The licence choice does not hinge on vendoring the skills
+(we don't — they are dev tooling and staleness makes vendoring a net negative).
+It hinges on whether clip2trace **distributes or network-serves AGPL code**. The
+dashboard imports the **AGPL-3.0 `@sinas/sdk`**; a shipped/served frontend that
+bundles it is a combined work, so AGPL attaches. Therefore **AGPL-3.0-or-later is
+the correct, conflict-free licence** for clip2trace. A permissive licence
+(MIT/Apache-2.0) would only be safe if we committed to never bundling
+`@sinas/sdk` (REST-only UI, SDK excluded from the shipped bundle) — more
+constraint than it is worth for a Sinas-native app. Calling the Sinas platform
+over its API and using the skills as local tooling do **not**, by themselves,
+force AGPL; the SDK dependency is the binding reason.
+
+**Follow-up:** confirm the platform `sinas` Python SDK licence from sinas-platform
+(not public PyPI) when instance access is available.
+
 ## Inferred-field caveats (must confirm with `sinas validate`)
 The package-author skill ships verbatim YAML only for functions, agents,
 queries, connectors, variables, manifests. For **collections, stores, components**
