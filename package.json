@@ -1,0 +1,15 @@
+{
+  "name": "clip2trace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Telegram source tracing for reused footage in edited videos.",
+  "scripts": {
+    "sinas:validate": "sinas validate",
+    "sinas:preview": "sinas preview",
+    "sinas:install": "sinas install",
+    "sinas:status": "sinas status"
+  },
+  "devDependencies": {
+    "@sinas/cli": "latest"
+  }
+}

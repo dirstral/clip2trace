@@ -1,0 +1,52 @@
+# --- Secrets & local config (NEVER commit) ---
+.env
+.env.*
+!.env.example
+.sinas/
+sinas-config.local.yaml
+*.session
+*.session-journal
+telegram*.session*
+*session_string*
+secrets.json
+credentials.json
+
+# --- Telegram / private data & downloaded media (NEVER commit) ---
+data/
+media/
+downloads/
+corpus/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.ts
+# allow tiny tracked test assets explicitly if ever needed:
+!tests/fixtures/**/*.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node (for @sinas/cli) ---
+node_modules/
+npm-debug.log*
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
+*.swp

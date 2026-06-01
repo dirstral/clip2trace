@@ -1,0 +1,600 @@
+apiVersion: sinas.co/v1
+kind: SinasPackage
+package:
+  name: clip2trace
+  version: "0.1.0"
+  description: Telegram source tracing for reused footage in edited videos.
+  author: dirstral
+  url: https://github.com/dirstral/clip2trace
+
+# ---------------------------------------------------------------------------
+# NOTE on inferred field names:
+#   The Sinas package-author skill ships verbatim YAML only for functions,
+#   agents, queries, connectors, variables and manifests. The field names used
+#   below for collections / stores / components are the camelCase form of the
+#   documented (snake_case) API properties and have NOT been seen in a verbatim
+#   package example. `sinas validate` against the live instance is the source of
+#   truth — see docs/research/sinas-investigation.md. Unknown keys are rejected
+#   by the strict schema, so adjust here if validation complains.
+# ---------------------------------------------------------------------------
+
+spec:
+  variables:
+    - name: PRIMARY_LLM
+      type: resource_ref
+      resource: llm_providers
+      description: Claude provider used by all clip2trace agents.
+      required: true
+    - name: ENABLE_TELEGRAM_LIVE_SEARCH
+      type: boolean
+      description: Enable live global Telegram search via Telethon. Default off (demo mode).
+      default: false
+      required: false
+    - name: MAX_VIDEO_MB
+      type: text
+      description: Soft cap on input video size in MB. (No numeric var type; stored as text.)
+      default: "500"
+      required: false
+    - name: TELEGRAM_API_ID
+      type: secret
+      description: Telegram API id (my.telegram.org). Required only when live search is enabled.
+      required: false
+    - name: TELEGRAM_API_HASH
+      type: secret
+      description: Telegram API hash. Required only when live search is enabled.
+      required: false
+    - name: TELEGRAM_SESSION_STRING
+      type: secret
+      description: Telethon StringSession for a USER account. Required only when live search is enabled.
+      required: false
+
+  collections:
+    - namespace: clip2trace
+      name: input-videos
+      metadataSchema:
+        type: object
+        properties:
+          job_id: { type: string }
+          duration_sec: { type: number }
+    - namespace: clip2trace
+      name: source-segments
+      metadataSchema:
+        type: object
+        properties:
+          job_id: { type: string }
+          segment_id: { type: string }
+    - namespace: clip2trace
+      name: keyframes
+      metadataSchema:
+        type: object
+        properties:
+          segment_id: { type: string }
+    - namespace: clip2trace
+      name: telegram-media
+      metadataSchema:
+        type: object
+        properties:
+          candidate_id: { type: string }
+    - namespace: clip2trace
+      name: reports
+      metadataSchema:
+        type: object
+        properties:
+          job_id: { type: string }
+    - namespace: clip2trace
+      name: demo-fixtures
+      metadataSchema:
+        type: object
+        properties:
+          fixture: { type: string }
+
+  stores:
+    - namespace: clip2trace
+      name: jobs
+      description: Job records keyed by job_id (status, progress, input metadata, errors).
+      visibility: shared
+    - namespace: clip2trace
+      name: segments
+      description: Candidate source segments per job.
+      visibility: shared
+    - namespace: clip2trace
+      name: search-results
+      description: Telegram search hits per query.
+      visibility: shared
+    - namespace: clip2trace
+      name: candidate-matches
+      description: Media-similarity match results per candidate.
+      visibility: shared
+    - namespace: clip2trace
+      name: query-cache
+      description: Cached Telegram query->results to avoid repeated live searches.
+      visibility: shared
+    - namespace: clip2trace
+      name: runtime-diagnostics
+      description: Output of diagnose_runtime capability probes.
+      visibility: shared
+
+  functions:
+    - namespace: clip2trace
+      name: create_job
+      description: Create a source-tracing job for one input video.
+      timeout: 30
+      inputSchema:
+        type: object
+        properties:
+          input_video_file_id: { type: string }
+          video_context: { type: string }
+          date_hint: { type: string }
+          language_hint: { type: string }
+          topic_hint: { type: string }
+          mode: { type: string, enum: [demo, live, hybrid], default: demo }
+      code: |
+        def handler(input_data, context):
+            mode = input_data.get("mode", "demo")
+            if mode not in ("demo", "live", "hybrid"):
+                return {"error": "mode must be demo|live|hybrid"}
+            exec_id = (context or {}).get("execution_id", "local")
+            job_id = "job_" + str(exec_id)
+            return {"job_id": job_id, "status": "created",
+                    "mode": mode, "next_step": "analyze_input_video"}
+
+    - namespace: clip2trace
+      name: diagnose_runtime
+      description: Probe runtime capabilities (libs, tools, disk, secrets access).
+      sharedPool: true
+      timeout: 30
+      inputSchema:
+        type: object
+        properties: {}
+      code: |
+        def handler(input_data, context):
+            import importlib, shutil, sys, tempfile, os
+            def has_mod(m):
+                try:
+                    importlib.import_module(m); return True
+                except Exception:
+                    return False
+            tmp = tempfile.gettempdir()
+            try:
+                free = shutil.disk_usage(tmp).free
+            except Exception:
+                free = None
+            return {
+                "python": sys.version.split()[0],
+                "modules": {m: has_mod(m) for m in
+                            ["cv2", "scenedetect", "imagehash", "PIL",
+                             "numpy", "telethon", "rapidfuzz"]},
+                "tools": {"ffmpeg": bool(shutil.which("ffmpeg")),
+                          "tesseract": bool(shutil.which("tesseract"))},
+                "tmp_dir": tmp, "tmp_free_bytes": free,
+                "has_access_token": bool((context or {}).get("access_token")),
+                "secrets_available": "secrets" in (context or {}),
+            }
+
+    - namespace: clip2trace
+      name: analyze_input_video
+      description: High-level orchestration of input-video analysis into source segments.
+      timeout: 300
+      inputSchema:
+        type: object
+        properties:
+          job_id: { type: string }
+          input_video_file_id: { type: string }
+          mode: { type: string, default: demo }
+        required: [job_id]
+      code: |
+        def handler(input_data, context):
+            job_id = input_data.get("job_id")
+            if not job_id:
+                return {"error": "job_id is required"}
+            return {"job_id": job_id, "status": "analyzed",
+                    "segments_ref": "clip2trace/segments/" + job_id,
+                    "next_step": "detect_source_segments",
+                    "note": "stub: wire detect_source_segments + extract_segment_clues"}
+
+    - namespace: clip2trace
+      name: detect_source_segments
+      description: Detect candidate reused-footage windows in the input video.
+      timeout: 300
+      inputSchema:
+        type: object
+        properties:
+          job_id: { type: string }
+          input_video_file_id: { type: string }
+        required: [job_id]
+      code: |
+        def handler(input_data, context):
+            if not input_data.get("job_id"):
+                return {"error": "job_id is required"}
+            # Stub: deterministic placeholder segment until video runtime is wired.
+            return {"segments": [
+                {"segment_id": "seg_001", "start_sec": 102.4, "end_sec": 118.9,
+                 "source_likelihood": 0.74, "reason": "candidate reused footage"}],
+                "implemented": False}
+
+    - namespace: clip2trace
+      name: extract_segment_clues
+      description: Extract keyframes, perceptual hashes, OCR text and visible handles.
+      timeout: 300
+      inputSchema:
+        type: object
+        properties:
+          job_id: { type: string }
+          segment_id: { type: string }
+          text_hint: { type: string }
+        required: [job_id, segment_id]
+      code: |
+        def handler(input_data, context):
+            import re
+            text = input_data.get("text_hint", "") or ""
+            handles = re.findall(r"@([A-Za-z][A-Za-z0-9_]{3,31})", text)
+            return {"segment_id": input_data.get("segment_id"),
+                    "keyframe_file_ids": [], "phashes": [],
+                    "ocr_text": "", "visible_handles": handles,
+                    "context_terms": [], "ocr_available": False,
+                    "implemented": False}
+
+    - namespace: clip2trace
+      name: generate_telegram_queries
+      description: Turn segment clues into a small ranked Telegram query set.
+      timeout: 30
+      inputSchema:
+        type: object
+        properties:
+          visible_handles: { type: array, items: { type: string } }
+          ocr_text: { type: string }
+          context_terms: { type: array, items: { type: string } }
+          caption: { type: string }
+      code: |
+        def handler(input_data, context):
+            qs, seen = [], set()
+            def add(q, t, p, r):
+                k = (q or "").strip().lower()
+                if q and k not in seen:
+                    seen.add(k)
+                    qs.append({"query": q, "query_type": t, "priority": p, "reason": r})
+            for h in (input_data.get("visible_handles") or []):
+                add("@" + str(h).lstrip("@"), "handle", 1, "Exact handle is strongest signal.")
+            ocr = (input_data.get("ocr_text") or "").strip()
+            if 0 < len(ocr) <= 120:
+                add(ocr, "ocr_exact", 2, "Exact on-screen text.")
+            for term in (input_data.get("context_terms") or []):
+                add(term, "context", 3, "Contextual term.")
+            qs.sort(key=lambda x: x["priority"])
+            return {"queries": qs}
+
+    - namespace: clip2trace
+      name: search_global_telegram_posts
+      description: Global Telegram post search (live via Telethon) or demo/cached fallback.
+      sharedPool: true
+      timeout: 120
+      inputSchema:
+        type: object
+        properties:
+          queries: { type: array, items: { type: object } }
+          mode: { type: string, default: demo }
+          cached_results: { type: array, items: { type: object } }
+          manual_urls: { type: array, items: { type: string } }
+      code: |
+        def handler(input_data, context):
+            mode = input_data.get("mode", "demo")
+            manual = input_data.get("manual_urls") or []
+            if manual:
+                return {"status": "ok", "source": "manual_urls",
+                        "candidates": [{"candidate_id": "manual_%d" % i, "url": u}
+                                       for i, u in enumerate(manual)]}
+            cached = input_data.get("cached_results")
+            if cached is not None:
+                return {"status": "ok", "source": "cached", "candidates": cached}
+            secrets = (context or {}).get("secrets") or {}
+            have_creds = all(secrets.get(k) for k in
+                             ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_SESSION_STRING"))
+            if mode in ("live", "hybrid") and not have_creds:
+                return {"status": "live_unavailable", "candidates": [],
+                        "diagnostics": ["missing Telegram secrets or not shared-pool"]}
+            return {"status": "demo_no_data", "candidates": [],
+                    "diagnostics": ["live search not implemented in stub"]}
+
+    - namespace: clip2trace
+      name: fetch_telegram_candidate_media
+      description: Fetch candidate metadata and optionally bounded media (dry-run by default).
+      sharedPool: true
+      timeout: 120
+      inputSchema:
+        type: object
+        properties:
+          candidates: { type: array, items: { type: object } }
+          dry_run: { type: boolean, default: true }
+      code: |
+        def handler(input_data, context):
+            cands = input_data.get("candidates") or []
+            out = []
+            for c in cands:
+                ch, mid = c.get("channel"), c.get("message_id")
+                url = c.get("url")
+                if not url and ch and mid:
+                    url = "https://t.me/%s/%s" % (str(ch).lstrip("@"), mid)
+                out.append({"candidate_id": c.get("candidate_id", "cand_unknown"),
+                            "url": url, "caption": c.get("caption", ""),
+                            "has_media": bool(c.get("has_media")),
+                            "accessible": c.get("accessible", True)})
+            return {"status": "metadata_only", "candidates": out, "downloaded": 0}
+
+    - namespace: clip2trace
+      name: verify_media_similarity
+      description: Compare segment keyframes vs candidate media (perceptual hash + text).
+      timeout: 120
+      inputSchema:
+        type: object
+        properties:
+          segment_phashes: { type: array, items: { type: string } }
+          candidate_phashes: { type: array, items: { type: string } }
+          segment_text: { type: string }
+          candidate_text: { type: string }
+      code: |
+        def handler(input_data, context):
+            def ham(a, b):
+                return bin(int(a, 16) ^ int(b, 16)).count("1")
+            sa = input_data.get("segment_phashes") or []
+            sb = input_data.get("candidate_phashes") or []
+            best, frames = 0.0, []
+            for i, a in enumerate(sa):
+                for j, b in enumerate(sb):
+                    if len(a) != len(b):
+                        continue
+                    sim = max(0.0, 1.0 - ham(a, b) / 64.0)
+                    if sim >= 0.85:
+                        frames.append({"segment_frame": i, "candidate_frame": j,
+                                       "similarity": round(sim, 4)})
+                    best = max(best, sim)
+            return {"visual_score": round(best, 4), "text_score": 0.0,
+                    "temporal_score": 0.0, "overall_score": round(best, 4),
+                    "matched_frames": frames}
+
+    - namespace: clip2trace
+      name: rank_source_candidates
+      description: Apply the evidence scoring rubric and produce ranked candidates with caveats.
+      timeout: 60
+      inputSchema:
+        type: object
+        properties:
+          candidates: { type: array, items: { type: object } }
+      code: |
+        def handler(input_data, context):
+            W = {"visual_similarity": 0.40, "handle_watermark": 0.15,
+                 "ocr_caption_query": 0.15, "predates_input": 0.15,
+                 "temporal_alignment": 0.05, "channel_relevance": 0.05,
+                 "forward_repost": 0.05}
+            def label(s):
+                for lo, name in [(0.85, "very_strong"), (0.70, "strong"),
+                                 (0.50, "plausible"), (0.30, "weak")]:
+                    if s >= lo:
+                        return name
+                return "reject"
+            out = []
+            for c in (input_data.get("candidates") or []):
+                ev = c.get("evidence", {})
+                score = sum(W[k] * max(0.0, min(1.0, float(ev.get(k, 0.0)))) for k in W)
+                out.append({"candidate_id": c.get("candidate_id"),
+                            "confidence": round(score, 4),
+                            "confidence_label": label(score),
+                            "rejected": score < 0.30, "evidence": ev,
+                            "caveats": ["Telegram post may itself be a repost.",
+                                        "Automated score; verify manually."],
+                            "url": c.get("url")})
+            out.sort(key=lambda x: x["confidence"], reverse=True)
+            return {"ranked_candidates": out}
+
+    - namespace: clip2trace
+      name: render_report
+      description: Build the provenance report JSON (cautious language, caveats included).
+      timeout: 60
+      inputSchema:
+        type: object
+        properties:
+          job_id: { type: string }
+          segments: { type: array, items: { type: object } }
+          ranked_candidates: { type: array, items: { type: object } }
+          mode: { type: string, default: demo }
+        required: [job_id]
+      code: |
+        def handler(input_data, context):
+            job_id = input_data.get("job_id")
+            if not job_id:
+                return {"error": "job_id is required"}
+            ranked = input_data.get("ranked_candidates") or []
+            kept = [c for c in ranked if not c.get("rejected")]
+            report = {
+                "job_id": job_id,
+                "summary": ("Likely Telegram source candidates for human "
+                            "verification; not confirmed origins."),
+                "generated_mode": input_data.get("mode", "demo"),
+                "segments": input_data.get("segments") or [],
+                "ranked_candidates": kept,
+                "caveats": [
+                    "Global Telegram search is retrieval, not proof of origin.",
+                    "A matched post may itself be a repost.",
+                    "Private/deleted posts are out of scope.",
+                    "Confidence scores are automated; verify manually."]}
+            return {"report_json": report, "report_file_id": None,
+                    "summary": report["summary"]}
+
+  skills:
+    - namespace: clip2trace
+      name: telegram-source-tracing
+      description: How to trace reused footage to likely Telegram source candidates.
+      content: |
+        See skills/telegram-source-tracing.md. Global Telegram search is
+        retrieval, not proof. Visual verification is required. A Telegram post
+        may be a repost. Private/deleted posts are out of scope. Never overclaim.
+    - namespace: clip2trace
+      name: evidence-scoring-rubric
+      description: Weights and confidence labels for ranking source candidates.
+      content: |
+        See skills/evidence-scoring-rubric.md. Weights: visual 0.40, handle 0.15,
+        ocr/caption 0.15, predates-input 0.15, temporal 0.05, channel 0.05,
+        forward 0.05. Labels: >=0.85 very_strong, >=0.70 strong, >=0.50 plausible,
+        >=0.30 weak, <0.30 reject.
+    - namespace: clip2trace
+      name: report-style
+      description: Cautious, evidence-backed provenance report writing style.
+      content: |
+        See skills/report-style.md. Use "candidate", "likely", "evidence
+        suggests". Never "confirmed original" in automated output.
+
+  agents:
+    - namespace: clip2trace
+      name: coordinator
+      description: Orchestrates source tracing for one input video, evidence-first and cautious.
+      llmProviderName: "${{ vars.PRIMARY_LLM }}"
+      model: claude-sonnet-4-6
+      temperature: 0.2
+      systemPrompt: |
+        See agents/coordinator.md. Orchestrate the pipeline, report job status,
+        and never claim an original source — only likely candidates with caveats.
+      enabledFunctions:
+        - clip2trace/create_job
+        - clip2trace/analyze_input_video
+        - clip2trace/search_global_telegram_posts
+        - clip2trace/fetch_telegram_candidate_media
+        - clip2trace/verify_media_similarity
+        - clip2trace/rank_source_candidates
+        - clip2trace/render_report
+      enabledSkills:
+        - { skill: clip2trace/telegram-source-tracing, preload: true }
+        - { skill: clip2trace/report-style, preload: true }
+      enabledStores:
+        - { store: clip2trace/jobs, access: readwrite }
+        - { store: clip2trace/segments, access: readwrite }
+        - { store: clip2trace/search-results, access: readwrite }
+        - { store: clip2trace/candidate-matches, access: readwrite }
+    - namespace: clip2trace
+      name: source-segment-analyst
+      description: Classifies segment type and outputs source likelihood + search clues.
+      llmProviderName: "${{ vars.PRIMARY_LLM }}"
+      model: claude-sonnet-4-6
+      temperature: 0.2
+      systemPrompt: |
+        See agents/source-segment-analyst.md.
+      enabledFunctions:
+        - clip2trace/detect_source_segments
+        - clip2trace/extract_segment_clues
+      enabledStores:
+        - { store: clip2trace/segments, access: readwrite }
+    - namespace: clip2trace
+      name: telegram-query-planner
+      description: Converts clues into a small ranked global Telegram query set.
+      llmProviderName: "${{ vars.PRIMARY_LLM }}"
+      model: claude-sonnet-4-6
+      temperature: 0.2
+      systemPrompt: |
+        See agents/telegram-query-planner.md.
+      enabledFunctions:
+        - clip2trace/generate_telegram_queries
+      enabledSkills:
+        - { skill: clip2trace/telegram-source-tracing, preload: true }
+      enabledStores:
+        - { store: clip2trace/query-cache, access: readwrite }
+    - namespace: clip2trace
+      name: evidence-ranker
+      description: Scores candidates with the rubric and always includes caveats.
+      llmProviderName: "${{ vars.PRIMARY_LLM }}"
+      model: claude-sonnet-4-6
+      temperature: 0.1
+      systemPrompt: |
+        See agents/evidence-ranker.md.
+      enabledFunctions:
+        - clip2trace/verify_media_similarity
+        - clip2trace/rank_source_candidates
+      enabledSkills:
+        - { skill: clip2trace/evidence-scoring-rubric, preload: true }
+      enabledStores:
+        - { store: clip2trace/candidate-matches, access: readwrite }
+    - namespace: clip2trace
+      name: report-writer
+      description: Writes a cautious provenance report for human verification.
+      llmProviderName: "${{ vars.PRIMARY_LLM }}"
+      model: claude-sonnet-4-6
+      temperature: 0.2
+      systemPrompt: |
+        See agents/report-writer.md.
+      enabledFunctions:
+        - clip2trace/render_report
+      enabledSkills:
+        - { skill: clip2trace/report-style, preload: true }
+      enabledStores:
+        - { store: clip2trace/jobs, access: readonly }
+
+  components:
+    - namespace: clip2trace
+      name: dashboard
+      title: clip2trace
+      visibility: shared
+      enabledFunctions:
+        - clip2trace/create_job
+        - clip2trace/render_report
+      enabledStores:
+        - { store: clip2trace/jobs, access: readonly }
+      sourceCode: |
+        // Skeleton — full source in components/dashboard.jsx.
+        export default function Dashboard() {
+          return <div>clip2trace — see components/dashboard.jsx</div>;
+        }
+
+  manifests:
+    - namespace: clip2trace
+      name: clip2trace
+      description: Manifest for clip2trace — Telegram source tracing for reused footage.
+      requiredResources:
+        - { type: function, namespace: clip2trace, name: create_job }
+        - { type: function, namespace: clip2trace, name: diagnose_runtime }
+        - { type: function, namespace: clip2trace, name: analyze_input_video }
+        - { type: function, namespace: clip2trace, name: detect_source_segments }
+        - { type: function, namespace: clip2trace, name: extract_segment_clues }
+        - { type: function, namespace: clip2trace, name: generate_telegram_queries }
+        - { type: function, namespace: clip2trace, name: search_global_telegram_posts }
+        - { type: function, namespace: clip2trace, name: fetch_telegram_candidate_media }
+        - { type: function, namespace: clip2trace, name: verify_media_similarity }
+        - { type: function, namespace: clip2trace, name: rank_source_candidates }
+        - { type: function, namespace: clip2trace, name: render_report }
+        - { type: agent, namespace: clip2trace, name: coordinator }
+        - { type: agent, namespace: clip2trace, name: source-segment-analyst }
+        - { type: agent, namespace: clip2trace, name: telegram-query-planner }
+        - { type: agent, namespace: clip2trace, name: evidence-ranker }
+        - { type: agent, namespace: clip2trace, name: report-writer }
+        - { type: skill, namespace: clip2trace, name: telegram-source-tracing }
+        - { type: skill, namespace: clip2trace, name: evidence-scoring-rubric }
+        - { type: skill, namespace: clip2trace, name: report-style }
+        - { type: collection, namespace: clip2trace, name: input-videos }
+        - { type: collection, namespace: clip2trace, name: source-segments }
+        - { type: collection, namespace: clip2trace, name: keyframes }
+        - { type: collection, namespace: clip2trace, name: telegram-media }
+        - { type: collection, namespace: clip2trace, name: reports }
+        - { type: collection, namespace: clip2trace, name: demo-fixtures }
+        - { type: store, namespace: clip2trace, name: jobs }
+        - { type: store, namespace: clip2trace, name: segments }
+        - { type: store, namespace: clip2trace, name: search-results }
+        - { type: store, namespace: clip2trace, name: candidate-matches }
+        - { type: store, namespace: clip2trace, name: query-cache }
+        - { type: store, namespace: clip2trace, name: runtime-diagnostics }
+        - { type: component, namespace: clip2trace, name: dashboard }
+      requiredPermissions:
+        - clip2trace.jobs.write:all
+        - clip2trace.jobs.read:all
+        - clip2trace.reports.read:all
+      optionalPermissions:
+        - clip2trace.telegram.search:all
+      exposedNamespaces: {}
+      storeDependencies: []
+
+  dependencies:
+    - { packageName: numpy }
+    - { packageName: pillow }
+    - { packageName: imagehash }
+    - { packageName: rapidfuzz }
+    - { packageName: python-dateutil }
+    - { packageName: requests }
+    # Video + Telegram deps require admin approval and larger containers; see docs/risks.md:
+    - { packageName: opencv-python-headless }
+    - { packageName: scenedetect }
+    - { packageName: telethon }

@@ -1,0 +1,15 @@
+[
+  {
+    "candidate_id": "cand_demo_1",
+    "channel": "demo_channel",
+    "message_id": 4521,
+    "url": "https://t.me/demo_channel/4521",
+    "posted_at": "2026-05-20T08:14:00Z",
+    "caption": "LIVE FROM DEMO",
+    "has_media": true,
+    "is_forward": false,
+    "accessible": true,
+    "source_query": "@demo_channel",
+    "phashes": ["c3e1c3e1c3e1c3e1"]
+  }
+]

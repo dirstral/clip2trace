@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clip2trace"
+version = "0.1.0"
+description = "Telegram source tracing for reused footage in edited videos."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "dirstral" }]
+
+# Baseline runtime deps. NOTE: inside Sinas, function dependencies must be
+# admin-approved (spec.dependencies in sinas-package.yaml). See docs/sinas-setup.md.
+# Heavy deps (torch/CLIP/FAISS/Whisper/EasyOCR) are intentionally EXCLUDED; see docs/risks.md
+# and the stretch issues before adding any of them.
+dependencies = [
+    "numpy>=1.24",
+    "pillow>=10.0",
+    "imagehash>=4.3",
+    "rapidfuzz>=3.0",
+    "python-dateutil>=2.8",
+    "requests>=2.31",
+    "pydantic>=2.5",
+]
+
+[project.optional-dependencies]
+# Installed locally for development; in Sinas these map to approved spec.dependencies.
+video = [
+    "opencv-python-headless>=4.8",
+    "scenedetect>=0.6",
+]
+telegram = [
+    "telethon>=1.34",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

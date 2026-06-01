@@ -1,0 +1,15 @@
+[
+  {
+    "segment_id": "seg_001",
+    "start_sec": 12.0,
+    "end_sec": 24.5,
+    "source_likelihood": 0.81,
+    "reason": "candidate reused footage",
+    "clues": {
+      "visible_handles": ["@demo_channel"],
+      "ocr_text": "LIVE FROM DEMO",
+      "context_terms": ["demo", "street", "crowd"],
+      "phashes": ["c3e1c3e1c3e1c3e1"]
+    }
+  }
+]

@@ -1,0 +1,25 @@
+apiVersion: sinas.co/v1
+kind: SinasConfig
+metadata:
+  name: clip2trace-roles
+# Custom permissions/roles used by the clip2trace manifest. The CLI applies this
+# file BEFORE the package (`sinas install`). Permission key format is the
+# documented `<namespace>.<resource>.<action>:<scope>` (scope :own or :all).
+# These are clip2trace-scoped custom permissions, not platform built-ins; if the
+# instance also requires built-in function-execute / agent-use permissions,
+# confirm their exact keys via the management console and add them to the
+# manifest requiredPermissions.
+spec:
+  roles:
+    - name: clip2trace-operator
+      description: Run clip2trace source-tracing jobs and read reports.
+      permissions:
+        - { key: "clip2trace.jobs.read:all", value: true }
+        - { key: "clip2trace.jobs.write:all", value: true }
+        - { key: "clip2trace.reports.read:all", value: true }
+        - { key: "clip2trace.telegram.search:all", value: true }
+    - name: clip2trace-viewer
+      description: Read-only access to clip2trace jobs and reports.
+      permissions:
+        - { key: "clip2trace.jobs.read:all", value: true }
+        - { key: "clip2trace.reports.read:all", value: true }
