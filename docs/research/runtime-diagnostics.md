@@ -42,31 +42,45 @@ Notes on the local box (developer machine):
   deps). `telethon` and `opencv`/`scenedetect` are optional extras (not installed).
 - Node/npm are also absent → `@sinas/cli` cannot run here.
 
-## Sinas runtime — deployed (via-10), probe output PENDING
+## Sinas runtime — PROBED on via-10 (2026-06-02, shared pool)
 
-`clip2trace/diagnose_runtime` is **deployed** to via-10 (`sinas install`,
-2026-06-01). Capturing its output is the last step: execute it from the **console
-UI** (Functions → `diagnose_runtime` → Run) — the scoped API key currently returns
-`403 Not authorized to execute this function` (see the resource-auth gotcha in
-`docs/research/sinas-investigation.md`), so the management API path can't run it
-yet. Paste the real JSON here once run, then fill the "Sinas runtime" column below.
+Real `clip2trace/diagnose_runtime` output from the console (execution
+`9df46078-…`):
 
-Until then, design against the documented container limits:
+```json
+{
+  "python": "3.11.15",
+  "modules": {"cv2": false, "scenedetect": false, "imagehash": false,
+              "PIL": false, "numpy": false, "telethon": false,
+              "rapidfuzz": false, "dateutil": false, "requests": false},
+  "tools": {"ffmpeg": false, "tesseract": false},
+  "tmp_dir": "/tmp", "tmp_free_bytes": 104849408,
+  "has_access_token": true, "secrets_available": true
+}
+```
 
-| Capability | Local dev | Sinas runtime (to confirm) | Design implication |
-|---|---|---|---|
-| Python | 3.14.5 | confirm via probe | core lib targets >=3.10 |
-| ffmpeg | absent | likely needed for decode | if absent, request as approved dep / system tool |
-| tesseract | absent | unknown | OCR optional; regex-handle fallback always works |
-| OpenCV | absent | needs `opencv-python-headless` (approved dep) | keyframe extraction degrades gracefully |
-| imagehash/Pillow | present | needs approved dep | perceptual hashing |
-| Telethon | absent | needs approved dep + sharedPool | live search only |
-| `/tmp` free | ~52 GB | **100 MB tmpfs** | chunk video; bound downloads |
-| disk | ample | **1 GB** | never store full corpora in-function |
-| RAM | ample | **512 MB** | process frames streaming, not whole video |
-| timeout | n/a | **300 s** | long videos → async + chunking |
-| `access_token` | n/a | present in context | use for API calls back to Sinas |
-| `secrets` | n/a | **shared-pool only** | Telegram functions must be `sharedPool: true` |
+| Capability | Sinas runtime (via-10, measured) | Design implication |
+|---|---|---|
+| Python | **3.11.15** | core lib targets >=3.10 ✓ |
+| `/tmp` free | **104,849,408 B = exactly 100 MiB** | confirms the 100 MB `/tmp` cap — chunk/bound everything |
+| `access_token` in context | **true** | functions can call back to the Sinas API |
+| `secrets` in context | **true** (this is a `sharedPool` fn) | Telegram functions correctly get secrets in the trusted pool |
+| ffmpeg / tesseract | **absent** | OCR + decode degrade to regex-handle / supplied-phash fallbacks |
+| numpy/pillow/imagehash/rapidfuzz/requests/dateutil | **not importable in the worker** | declared in `spec.dependencies` + shown under console "Installed Dependencies (9)", but the worker pool had not loaded them at probe time → click **"Reload Workers"** on the Functions page and re-probe |
+| cv2 / scenedetect / telethon | **absent** | heavy deps; may need a larger worker image. Pipeline runs in fallback mode regardless |
+
+**Key takeaway:** the install registered all 9 dependencies, but the **function
+workers report none importable** until "Reload Workers" is clicked (follow-up).
+Because every clip2trace step has a dependency-free fallback (see the matrix
+below), the pipeline still executes and returns structured JSON in demo mode with
+zero deps — real perceptual hashing/scoring activates once the light deps load.
+
+**Follow-ups (#3):** (1) click "Reload Workers" and re-probe to confirm the light
+deps load; (2) request `ffmpeg`/`tesseract`/a heavier worker image if real video
+decode/OCR is needed on-instance (otherwise fallbacks cover the demo).
+
+Documented container ceilings (design against these): **512 MB RAM, 1 GB disk,
+100 MB `/tmp` (confirmed), 300 s timeout.**
 
 ## Graceful-degradation matrix (what clip2trace does when a capability is missing)
 
