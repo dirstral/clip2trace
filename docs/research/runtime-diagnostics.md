@@ -81,9 +81,10 @@ reload reported all modules `false`, so the reload step is required after instal
 - Only **opencv/scenedetect** (and ffmpeg/tesseract tools) remain unavailable, so
   on-instance *video frame extraction* isn't active yet.
 
-**Follow-ups (#3, infra/Ark):** make `cv2`/`scenedetect` importable in the worker
-(add `libGL`/system libs or a heavier worker image), and add `ffmpeg`/`tesseract`
-if real on-instance decode/OCR is wanted. Not blockers for the demo.
+**Follow-ups (#3 → tracked in #33, infra/Ark):** make `cv2`/`scenedetect`
+importable in the worker (add `libGL`/system libs or a heavier worker image), and
+add `ffmpeg`/`tesseract` if real on-instance decode/OCR is wanted. Not blockers for
+the demo.
 
 Documented container ceilings (design against these): **512 MB RAM, 1 GB disk,
 100 MB `/tmp` (confirmed), 300 s timeout.**
