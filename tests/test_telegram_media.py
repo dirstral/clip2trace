@@ -46,10 +46,13 @@ def test_fetch_not_dry_run_without_client_is_metadata_only():
 
 # --------------------------- fake telethon download glue ---------------------------
 
-def _msg(mid, size, dl_none=False):
+def _msg(mid, size, dl_none=False, actual=None):
+    # `size` is what msg.file.size reports (None = unknown, e.g. some photos);
+    # `actual` is the real byte count written to disk (defaults to size or 0).
     return pytypes.SimpleNamespace(
         file=(pytypes.SimpleNamespace(size=size) if size is not None else None),
-        _mid=mid, _dl_none=dl_none)
+        _mid=mid, _dl_none=dl_none,
+        _actual=(actual if actual is not None else (size or 0)))
 
 
 class _DLClient:
@@ -74,8 +77,13 @@ class _DLClient:
     def download_media(self, msg, file=None):
         if getattr(msg, "_dl_none", False):
             return None
+        # Write a real file of `_actual` bytes so the downloader's post-download
+        # os.path.getsize budget enforcement is genuinely exercised.
+        path = os.path.join(file, f"{msg._mid}.bin")
+        with open(path, "wb") as fh:
+            fh.write(b"x" * int(getattr(msg, "_actual", 0)))
         self.downloaded.append(msg._mid)
-        return f"{file}/{msg._mid}.bin"
+        return path
 
 
 @pytest.fixture
@@ -108,11 +116,11 @@ def _client_with(get_map):
     return TelethonSearchClient(lambda: _DLClient(get_map))
 
 
-def test_download_success(flood_error):
+def test_download_success(flood_error, tmp_path):
     sc = _client_with({10: _msg(10, 1000), 11: _msg(11, 2000)})
-    res = sc.download_candidates(_cands(10, 11), dest_dir="/tmp")
+    res = sc.download_candidates(_cands(10, 11), dest_dir=str(tmp_path))
     assert res["downloaded"] == 2
-    assert res["candidates"][0]["media_file_id"] == "/tmp/10.bin"
+    assert res["candidates"][0]["media_file_id"] == str(tmp_path / "10.bin")
     assert all(c["accessible"] for c in res["candidates"])
 
 
@@ -157,17 +165,35 @@ def test_download_flood_stops(flood_error):
     assert any("flood wait" in d for d in res["diagnostics"])
 
 
-def test_download_respects_max_media(flood_error):
+def test_download_respects_max_media(flood_error, tmp_path):
     sc = _client_with({10: _msg(10, 100), 11: _msg(11, 100), 12: _msg(12, 100)})
-    res = sc.download_candidates(_cands(10, 11, 12), max_media=2)
+    res = sc.download_candidates(_cands(10, 11, 12), max_media=2, dest_dir=str(tmp_path))
     assert res["downloaded"] == 2
 
 
-def test_download_respects_total_budget(flood_error):
+def test_download_respects_total_budget(flood_error, tmp_path):
     sc = _client_with({10: _msg(10, 60), 11: _msg(11, 60)})
-    res = sc.download_candidates(_cands(10, 11), total_budget=100)  # 2nd would exceed
+    res = sc.download_candidates(_cands(10, 11), total_budget=100,  # 2nd would exceed
+                                dest_dir=str(tmp_path))
     assert res["downloaded"] == 1
     assert any("tmp byte budget" in d for d in res["diagnostics"])
+
+
+def test_download_unknown_size_enforces_budget(flood_error, tmp_path):
+    # size reported None (e.g. photos) but real bytes counted via os.path.getsize.
+    sc = _client_with({10: _msg(10, None, actual=60), 11: _msg(11, None, actual=60)})
+    res = sc.download_candidates(_cands(10, 11), total_budget=100, dest_dir=str(tmp_path))
+    assert res["downloaded"] == 1  # 2nd would push spent (60+60) over 100
+    assert any("tmp byte budget" in d for d in res["diagnostics"])
+
+
+def test_download_unknown_size_over_cap_removed(flood_error, tmp_path):
+    # size None, but the downloaded file is over the per-file cap -> skipped + removed.
+    sc = _client_with({10: _msg(10, None, actual=200)})
+    res = sc.download_candidates(_cands(10), max_bytes=100, dest_dir=str(tmp_path))
+    assert res["downloaded"] == 0
+    assert any("over per-file cap" in d for d in res["diagnostics"])
+    assert list(tmp_path.iterdir()) == []  # cleaned up
 
 
 def test_download_skips_no_media_or_inaccessible(flood_error):
