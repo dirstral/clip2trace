@@ -57,12 +57,11 @@ def default_parse_results(payload) -> List[Dict]:
                 "message_id": mid,
                 "url": url,
                 "posted_at": r.get("posted_at") or r.get("date"),
-                "caption": r.get("caption") or r.get("text") or "",
+                "caption": r.get("caption") or r.get("text") or r.get("message") or "",
                 "has_media": bool(r.get("has_media", r.get("media"))),
                 "is_forward": bool(r.get("is_forward")),
                 "accessible": r.get("accessible", True),
                 "source_query": r.get("source_query"),
-                "source": "third_party",
             }
         )
     return out
@@ -115,7 +114,11 @@ class HttpSearchAdapter:
             resp = requests.post(url, json=body, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
             payload = resp.json()
-        return self._parse_results(payload)
+        candidates = self._parse_results(payload)
+        # Tag provenance consistently even if a custom parser omits it.
+        for c in candidates:
+            c.setdefault("source", self.name)
+        return candidates
 
 
 def build_search_fallback_from_secrets(

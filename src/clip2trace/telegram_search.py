@@ -192,6 +192,14 @@ def search_posts(
             diagnostics.append(f"live search failed: {exc!r}")
             # fall through to the third-party fallback / cached
 
+    # Record why the direct path was skipped (before any fallback succeeds, so
+    # the reason is always reported per the contract above).
+    if mode in ("live", "hybrid") and live_client is None:
+        diagnostics.append(
+            "live search unavailable: no Telethon client (missing "
+            "TELEGRAM_API_ID/HASH/SESSION_STRING or live not enabled)."
+        )
+
     # Third-party managed search adapter — used when the direct Telethon path is
     # unavailable or failed (issue #28). Same `search(queries)` contract.
     if mode in ("live", "hybrid") and fallback_provider is not None:
@@ -214,12 +222,6 @@ def search_posts(
             "candidates": cached_results,
             "diagnostics": diagnostics,
         }
-
-    if mode in ("live", "hybrid") and live_client is None:
-        diagnostics.append(
-            "live search unavailable: no Telethon client (missing "
-            "TELEGRAM_API_ID/HASH/SESSION_STRING or live not enabled)."
-        )
 
     return {
         "status": "live_unavailable" if mode != "demo" else "demo_no_data",

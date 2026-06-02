@@ -45,7 +45,15 @@ def test_default_parse_results_normalises():
     out = default_parse_results({"results": [{"channel": "c", "message_id": 4}]})
     assert out[0]["url"] == "https://t.me/c/4"
     assert out[0]["candidate_id"] == "c_4"
-    assert out[0]["source"] == "third_party"
+    # the parser itself does not tag source; the adapter does (see search()).
+    assert "source" not in out[0]
+
+
+def test_default_parse_results_caption_from_message():
+    out = default_parse_results(
+        {"results": [{"channel": "c", "message_id": 1, "message": "hello"}]}
+    )
+    assert out[0]["caption"] == "hello"
 
 
 def test_default_parse_results_tolerates_garbage():
@@ -84,7 +92,8 @@ def test_adapter_custom_request_and_parser():
     )
     out = ad.search(QUERIES)
     assert captured["body"] == {"query": "@demo_channel protest"}
-    assert out == [{"candidate_id": "1"}]
+    # adapter tags source (= its name) even when the custom parser omits it.
+    assert out == [{"candidate_id": "1", "source": "third_party"}]
 
 
 # --------------------------- build from secrets ---------------------------
