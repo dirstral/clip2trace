@@ -5,14 +5,21 @@ callable. The real faster-whisper path lives behind the optional `asr` extra and
 is not exercised in CI.
 """
 
+import importlib.util
+
+import pytest
+
 from clip2trace.asr import extract_transcript
 from clip2trace.telegram_search import derive_context_terms, generate_queries
 
 
 def test_no_backend_returns_empty_transcript():
-    # No injected transcriber and (in CI) no faster-whisper installed -> "".
-    # Even if the dep were present, this path must degrade gracefully.
-    assert extract_transcript("/nonexistent/clip.mp4", transcriber=None) in ("", None)
+    # extract_transcript() always returns a str (""). Skip when faster-whisper is
+    # installed so this stays deterministic and lightweight (no model load, no
+    # attempt to transcribe a non-existent file).
+    if importlib.util.find_spec("faster_whisper") is not None:
+        pytest.skip("faster-whisper installed; default-backend path not exercised here")
+    assert extract_transcript("/nonexistent/clip.mp4", transcriber=None) == ""
 
 
 def test_injected_transcriber_returns_its_text():

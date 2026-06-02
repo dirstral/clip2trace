@@ -110,16 +110,18 @@ the default pipeline** — it is an opt-in upgrade path.
 
 | Backend / model | On-disk model | Extra deps | Approx. peak RAM | Speed (CPU) |
 |---|---|---|---|---|
-| faster-whisper `tiny` (int8) | ~75 MB | ctranslate2 (+ optional torch) | ~0.5–1 GB | ~1–3× realtime |
-| faster-whisper `base` | ~145 MB | ctranslate2 | ~1 GB+ | slower than realtime |
+| faster-whisper `tiny` (int8) | ~75 MB | ctranslate2 + onnxruntime (no torch) | ~0.5–1 GB | ~1–3× realtime |
+| faster-whisper `base` | ~145 MB | ctranslate2 + onnxruntime (no torch) | ~1 GB+ | slower than realtime |
 | openai-whisper `base` | ~140 MB | **torch** (~2 GB wheel) + ffmpeg binary | ~2 GB+ | well below realtime on CPU |
 
 The Sinas worker is **pip-only, 512 MB RAM, 1 CPU, 100 MB `/tmp`, 300 s
 timeout** with no system binaries. Even the smallest model exceeds the RAM
-budget once torch/ctranslate2 are loaded, openai-whisper additionally needs an
-`ffmpeg` binary the image can't provide, and CPU-only transcription of a clip
-blows the 300 s timeout. So ASR is intentionally **excluded from the worker** and
-provisioned only locally / by an operator on a beefier host.
+budget once the model + native runtime are loaded — for faster-whisper that's
+CTranslate2/onnxruntime plus the model weights (no torch); openai-whisper is
+heavier still and *additionally* needs torch and an `ffmpeg` binary the image
+can't provide. CPU-only transcription of a clip also blows the 300 s timeout. So
+ASR is intentionally **excluded from the worker** and provisioned only locally /
+by an operator on a beefier host.
 
 **Graceful degradation (no behaviour change without a transcript).**
 `src/clip2trace/asr.py` import-guards the backend and keeps it injectable:

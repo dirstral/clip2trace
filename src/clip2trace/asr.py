@@ -1,9 +1,12 @@
 """Optional ASR / transcript extraction — spoken context for query planning.
 
 ASR is an **optional, operator-provisioned/local upgrade path**, not part of the
-default pipeline. Real ASR backends (faster-whisper / openai-whisper) pull in
-torch + a multi-hundred-MB model and will not realistically run on the pip-only,
-512 MB / 300 s Sinas worker (see docs/risks.md, row 14). So:
+default pipeline. Both real backends are heavy and will not realistically run on
+the pip-only, 512 MB / 300 s Sinas worker (see docs/risks.md, row 14), but for
+different reasons: **faster-whisper** (the default here) is built on the
+CTranslate2 native runtime (plus onnxruntime for VAD) and downloads a
+multi-hundred-MB model — it does *not* use torch; **openai-whisper** instead
+pulls in torch + ffmpeg. So:
 
 - the heavy backend is **import-guarded** — if the dep is absent we return ``""``
   (no transcript) and the rest of the pipeline behaves exactly as before;
@@ -28,8 +31,9 @@ Transcriber = Callable[[str], str]
 def _load_default_transcriber() -> Optional[Transcriber]:
     """Return a faster-whisper-backed transcriber, or ``None`` if unavailable.
 
-    Import-guarded: faster-whisper (and its torch/model footprint) is an optional
-    `asr` extra. Absent it, we return ``None`` and callers degrade gracefully.
+    Import-guarded: faster-whisper (CTranslate2 native runtime + a
+    multi-hundred-MB model download, no torch) is an optional `asr` extra. Absent
+    it, we return ``None`` and callers degrade gracefully.
     """
     try:
         from faster_whisper import WhisperModel  # type: ignore
