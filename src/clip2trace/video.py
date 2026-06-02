@@ -83,8 +83,11 @@ def _detect_shots_av(
             next_sample = t + step
             feat = _feat(frame.to_ndarray(format="rgb24"))
             if prev is not None:
-                d = float(np.mean(
-                    [0.5 * np.abs(feat[ch] - prev[ch]).sum() for ch in range(3)]))
+                d = float(
+                    np.mean(
+                        [0.5 * np.abs(feat[ch] - prev[ch]).sum() for ch in range(3)]
+                    )
+                )
                 times.append(t)
                 dists.append(d)
             prev = feat
@@ -98,7 +101,8 @@ def _detect_shots_av(
     last_cut = -1e9
     for i, d in enumerate(dists):
         local_max = (i == 0 or d >= dists[i - 1]) and (
-            i + 1 >= len(dists) or d >= dists[i + 1])
+            i + 1 >= len(dists) or d >= dists[i + 1]
+        )
         if d > threshold and local_max and times[i] - last_cut >= min_gap:
             cuts.append(times[i])
             last_cut = times[i]

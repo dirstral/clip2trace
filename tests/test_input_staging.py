@@ -29,9 +29,14 @@ def _fake_get(captured, status=200, content=b"video-bytes"):
     def _get(url, headers=None, timeout=None):
         captured["url"] = url
         captured["headers"] = headers
-        payload = {"content_base64": base64.b64encode(content).decode("ascii"),
-                   "content_type": "video/mp4", "file_metadata": {}, "version": 1}
+        payload = {
+            "content_base64": base64.b64encode(content).decode("ascii"),
+            "content_type": "video/mp4",
+            "file_metadata": {},
+            "version": 1,
+        }
         return _FakeResp(status, payload)
+
     return _get
 
 
@@ -49,7 +54,8 @@ def test_stage_input_file_decodes_base64_to_tmp(monkeypatch, tmp_path):
         assert fh.read() == b"video-bytes"
     # name-addressed download from the SDK-default base + input-videos collection
     assert captured["url"] == (
-        SINAS_RUNTIME_BASE_URL + "/files/clip2trace/input-videos/vid123")
+        SINAS_RUNTIME_BASE_URL + "/files/clip2trace/input-videos/vid123"
+    )
     assert captured["headers"]["Authorization"] == "Bearer tok"
 
 
@@ -79,11 +85,16 @@ def test_stage_input_file_requires_token_and_file_id(monkeypatch, tmp_path):
 
 def test_stage_input_file_non_200_returns_none(monkeypatch, tmp_path):
     monkeypatch.setattr(requests, "get", _fake_get({}, status=403))
-    assert stage_input_file("vid", {"access_token": "t"},
-                            dest_dir=str(tmp_path)) is None
+    assert (
+        stage_input_file("vid", {"access_token": "t"}, dest_dir=str(tmp_path)) is None
+    )
 
 
 def test_stage_input_file_rejects_oversize(monkeypatch, tmp_path):
     monkeypatch.setattr(requests, "get", _fake_get({}, content=b"x" * 500))
-    assert stage_input_file("vid", {"access_token": "t"}, dest_dir=str(tmp_path),
-                            max_bytes=100) is None
+    assert (
+        stage_input_file(
+            "vid", {"access_token": "t"}, dest_dir=str(tmp_path), max_bytes=100
+        )
+        is None
+    )

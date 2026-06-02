@@ -61,12 +61,15 @@ def handler(input_data, context):
     if not video_path and file_id:
         try:
             from clip2trace.storage import stage_input_file
+
             video_path = stage_input_file(file_id, context)
         except Exception as exc:
             diagnostics.append(f"input staging failed: {exc!r}")
         diagnostics.append(
-            f"staged input video {file_id}" if video_path
-            else f"input video {file_id} could not be staged")
+            f"staged input video {file_id}"
+            if video_path
+            else f"input video {file_id} could not be staged"
+        )
 
     # --- #10 visual: extract keyframes -> perceptual hashes when possible. ---
     if video_path and start is not None and end is not None:

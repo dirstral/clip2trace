@@ -21,12 +21,15 @@ def handler(input_data, context):
     from clip2trace.matching import cluster_segments, link_candidate_to_segments
 
     clusters = cluster_segments(segments, threshold=threshold)
-    out = [{"cluster_id": c["cluster_id"], "segment_ids": c["segment_ids"]}
-           for c in clusters]
+    out = [
+        {"cluster_id": c["cluster_id"], "segment_ids": c["segment_ids"]}
+        for c in clusters
+    ]
     result = {"clusters": out, "cluster_count": len(out), "implemented": True}
 
     candidate_phashes = list(input_data.get("candidate_phashes") or [])
     if candidate_phashes:
         result["linked_segment_ids"] = link_candidate_to_segments(
-            candidate_phashes, segments, threshold=threshold)
+            candidate_phashes, segments, threshold=threshold
+        )
     return result

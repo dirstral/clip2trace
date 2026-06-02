@@ -37,9 +37,13 @@ SAMPLES = os.path.join(ROOT, "samples")
 
 def inline_detect():
     import yaml
+
     data = yaml.safe_load(open(PKG))
-    code = next(f["code"] for f in data["spec"]["functions"]
-                if f["name"] == "detect_source_segments")
+    code = next(
+        f["code"]
+        for f in data["spec"]["functions"]
+        if f["name"] == "detect_source_segments"
+    )
     ns: dict = {}
     exec(compile(code, "<inline:detect_source_segments>", "exec"), ns)
     return ns["handler"]
@@ -71,14 +75,15 @@ def export_one(video_path: str, out_root: str, detect) -> dict:
     probe.close()
     fps = max(1.0, min(fps, 60.0))
 
-    bounds = [(float(s["start_sec"]), float(s["end_sec"]), s["segment_id"])
-              for s in segments]
+    bounds = [
+        (float(s["start_sec"]), float(s["end_sec"]), s["segment_id"]) for s in segments
+    ]
 
     # One decode pass; route each frame to the segment whose window contains it.
     container = av.open(video_path)
     vstream = container.streams.video[0]
     tb = vstream.time_base
-    writers = {}        # segment_id -> (out_container, out_stream)
+    writers = {}  # segment_id -> (out_container, out_stream)
     thumb_saved = set()
     counts = {sid: 0 for _, _, sid in bounds}
     paths = {}
@@ -114,25 +119,37 @@ def export_one(video_path: str, out_root: str, detect) -> dict:
             counts[sid] += 1
             if sid not in thumb_saved:
                 from PIL import Image
+
                 Image.fromarray(rgb).save(os.path.join(out_dir, f"{sid}.png"))
                 thumb_saved.add(sid)
     finally:
         for oc, ostream in writers.values():
-            for pkt in ostream.encode():     # flush
+            for pkt in ostream.encode():  # flush
                 oc.mux(pkt)
             oc.close()
         container.close()
 
     seg_info = []
     for start, end, sid in bounds:
-        info = {"segment_id": sid, "start": start, "end": end,
-                "frames": counts.get(sid, 0), "path": paths.get(sid)}
+        info = {
+            "segment_id": sid,
+            "start": start,
+            "end": end,
+            "frames": counts.get(sid, 0),
+            "path": paths.get(sid),
+        }
         seg_info.append(info)
-        print(f"  {sid} [{start:6.2f}-{end:6.2f}s] frames={info['frames']:4d} "
-              f"-> {os.path.relpath(info['path'], ROOT) if info['path'] else '(empty)'}")
+        print(
+            f"  {sid} [{start:6.2f}-{end:6.2f}s] frames={info['frames']:4d} "
+            f"-> {os.path.relpath(info['path'], ROOT) if info['path'] else '(empty)'}"
+        )
     print(f"  clips in: {os.path.relpath(out_dir, ROOT)}/")
-    return {"video": video_path, "method": method, "out_dir": out_dir,
-            "segments": seg_info}
+    return {
+        "video": video_path,
+        "method": method,
+        "out_dir": out_dir,
+        "segments": seg_info,
+    }
 
 
 def main() -> int:
@@ -148,7 +165,8 @@ def main() -> int:
         videos = sorted(
             glob.glob(os.path.join(SAMPLES, "*.mkv"))
             + glob.glob(os.path.join(SAMPLES, "*.mp4"))
-            + glob.glob(os.path.join(SAMPLES, "*.mov")))
+            + glob.glob(os.path.join(SAMPLES, "*.mov"))
+        )
     else:
         ap.error("pass --video PATH or --all")
 
@@ -157,14 +175,18 @@ def main() -> int:
         return 1
 
     detect = inline_detect()
-    print(f"loaded inline detect_source_segments; exporting {len(videos)} video(s) "
-          f"(PyAV path, no LLM) -> {os.path.relpath(args.out, ROOT)}/")
+    print(
+        f"loaded inline detect_source_segments; exporting {len(videos)} video(s) "
+        f"(PyAV path, no LLM) -> {os.path.relpath(args.out, ROOT)}/"
+    )
     for v in videos:
         try:
             export_one(v, args.out, detect)
         except Exception as exc:  # keep going across the batch
             print(f"  !! failed on {v}: {exc!r}")
-    print(f"\nDone. Open {os.path.relpath(args.out, ROOT)}/ and play the seg_*.mp4 clips.")
+    print(
+        f"\nDone. Open {os.path.relpath(args.out, ROOT)}/ and play the seg_*.mp4 clips."
+    )
     return 0
 
 

@@ -93,16 +93,26 @@ def resolve_runtime_base_url(context: Optional[Dict[str, Any]] = None) -> str:
     inline resolution used in the sandboxed `code:` blocks in sinas-package.yaml.
     """
     import os
+
     context = context or {}
-    return (context.get("api_url") or context.get("base_url")
-            or os.environ.get("SINAS_BASE_URL") or SINAS_RUNTIME_BASE_URL)
+    return (
+        context.get("api_url")
+        or context.get("base_url")
+        or os.environ.get("SINAS_BASE_URL")
+        or SINAS_RUNTIME_BASE_URL
+    )
 
 
-def stage_input_file(file_id: str, context: Optional[Dict[str, Any]] = None, *,
-                     namespace: str = "clip2trace", collection: str = "input-videos",
-                     dest_dir: Optional[str] = None,
-                     max_bytes: int = _MAX_STAGED_BYTES,
-                     timeout: float = 120.0) -> Optional[str]:
+def stage_input_file(
+    file_id: str,
+    context: Optional[Dict[str, Any]] = None,
+    *,
+    namespace: str = "clip2trace",
+    collection: str = "input-videos",
+    dest_dir: Optional[str] = None,
+    max_bytes: int = _MAX_STAGED_BYTES,
+    timeout: float = 120.0,
+) -> Optional[str]:
     """Download a collection file to a local path so PyAV/opencv can decode it.
 
     `file_id` is the file's NAME within the collection — the Sinas files API is
@@ -116,6 +126,7 @@ def stage_input_file(file_id: str, context: Optional[Dict[str, Any]] = None, *,
     import os
     import tempfile
     from urllib.parse import quote
+
     context = context or {}
     token = context.get("access_token")
     if not file_id or not token:
@@ -129,8 +140,10 @@ def stage_input_file(file_id: str, context: Optional[Dict[str, Any]] = None, *,
     path = os.path.join(dest_dir, name if "." in name else name + ".mp4")
     try:
         import requests  # baseline dep
-        resp = requests.get(url, headers={"Authorization": f"Bearer {token}"},
-                            timeout=timeout)
+
+        resp = requests.get(
+            url, headers={"Authorization": f"Bearer {token}"}, timeout=timeout
+        )
         if resp.status_code != 200:
             return None
         b64 = (resp.json() or {}).get("content_base64")

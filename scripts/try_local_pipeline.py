@@ -50,24 +50,25 @@ def _scene_frame(kind: int) -> np.ndarray:
     grayscale shot detector fires on cuts) and spatial structure (so perceptual
     hashes differ between scenes but match a scene to its identical repeat)."""
     img = np.zeros((H, W, 3), dtype=np.uint8)
-    if kind == 0:                       # dark field + bright block, upper-left
+    if kind == 0:  # dark field + bright block, upper-left
         img[:] = 20
         img[20:120, 20:160, :] = 255
-    elif kind == 1:                     # bright field + dark block, lower-right
+    elif kind == 1:  # bright field + dark block, lower-right
         img[:] = 225
         img[120:220, 160:300, :] = 15
-    else:                               # mid-gray checkerboard
+    else:  # mid-gray checkerboard
         tile = 40
         for yy in range(0, H, tile):
             for xx in range(0, W, tile):
                 v = 200 if ((yy // tile + xx // tile) % 2 == 0) else 60
-                img[yy:yy + tile, xx:xx + tile, :] = v
+                img[yy : yy + tile, xx : xx + tile, :] = v
     return img
 
 
 def make_compilation(path: str) -> float:
     """Encode A,B,C,A — scene A repeats, so two segments should cluster."""
     import av
+
     order = [0, 1, 2, 0]  # the last scene is identical to the first
     container = av.open(path, mode="w")
     stream = container.add_stream("mpeg4", rate=FPS)
@@ -86,6 +87,7 @@ def make_compilation(path: str) -> float:
 
 def load_inline_handlers():
     import yaml
+
     data = yaml.safe_load(open(PKG))
     code_by_name = {f["name"]: f["code"] for f in data["spec"]["functions"]}
     handlers = {}
@@ -98,9 +100,11 @@ def load_inline_handlers():
 
 def start_files_stub(instance_dir: str):
     """Serve GET /files/{ns}/{collection}/{name} like the real Sinas files API."""
+
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
             from urllib.parse import unquote
+
             name = unquote(self.path.rstrip("/").split("/")[-1].split("?")[0])
             fp = os.path.join(instance_dir, "input-videos", name)
             if not os.path.isfile(fp):
@@ -109,10 +113,14 @@ def start_files_stub(instance_dir: str):
                 return
             with open(fp, "rb") as fh:
                 raw = fh.read()
-            body = json.dumps({
-                "content_base64": base64.b64encode(raw).decode("ascii"),
-                "content_type": "video/mp4", "file_metadata": {}, "version": 1,
-            }).encode()
+            body = json.dumps(
+                {
+                    "content_base64": base64.b64encode(raw).decode("ascii"),
+                    "content_type": "video/mp4",
+                    "file_metadata": {},
+                    "version": 1,
+                }
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -143,6 +151,7 @@ def main() -> int:
         dest = os.path.join(coll, name)
         if os.path.abspath(args.video) != os.path.abspath(dest):
             import shutil
+
             shutil.copyfile(args.video, dest)
         duration = None
         print(f"[setup] using real video {args.video} -> {dest}")
@@ -151,8 +160,10 @@ def main() -> int:
         dest = os.path.join(coll, name)
         duration = make_compilation(dest)
         size = os.path.getsize(dest)
-        print(f"[setup] generated synthetic compilation {dest} "
-              f"({size/1024:.0f} KB, ~{duration:.0f}s, scene A repeats)")
+        print(
+            f"[setup] generated synthetic compilation {dest} "
+            f"({size/1024:.0f} KB, ~{duration:.0f}s, scene A repeats)"
+        )
 
     httpd, port = start_files_stub(args.instance_dir)
     base_url = f"http://127.0.0.1:{port}"
@@ -163,9 +174,14 @@ def main() -> int:
     print(f"[setup] loaded {len(fns)} inline functions from sinas-package.yaml\n")
 
     # 1) analyze_input_video — stages via the stub, PyAV-decodes, returns segments
-    analyzed = fns["analyze_input_video"]({
-        "job_id": "job_local", "mode": "hybrid", "input_video_file_id": name,
-    }, context)
+    analyzed = fns["analyze_input_video"](
+        {
+            "job_id": "job_local",
+            "mode": "hybrid",
+            "input_video_file_id": name,
+        },
+        context,
+    )
     print("=== analyze_input_video ===")
     print("  method   :", analyzed.get("method"))
     print("  segments :", len(analyzed.get("segments") or []))
@@ -179,18 +195,30 @@ def main() -> int:
     print("\n=== extract_segment_clues (per segment) ===")
     enriched = []
     for seg in segments:
-        clues = fns["extract_segment_clues"]({
-            "job_id": "job_local", "segment_id": seg["segment_id"],
-            "input_video_file_id": name,
-            "start_sec": seg.get("start_sec"), "end_sec": seg.get("end_sec"),
-        }, context)
+        clues = fns["extract_segment_clues"](
+            {
+                "job_id": "job_local",
+                "segment_id": seg["segment_id"],
+                "input_video_file_id": name,
+                "start_sec": seg.get("start_sec"),
+                "end_sec": seg.get("end_sec"),
+            },
+            context,
+        )
         phashes = clues.get("phashes") or []
-        enriched.append({"segment_id": seg["segment_id"],
-                         "start_sec": seg.get("start_sec"),
-                         "end_sec": seg.get("end_sec"), "phashes": phashes})
-        print(f"  {seg['segment_id']} "
-              f"[{seg.get('start_sec')}-{seg.get('end_sec')}s] "
-              f"phashes={len(phashes)} sample={phashes[:1]}")
+        enriched.append(
+            {
+                "segment_id": seg["segment_id"],
+                "start_sec": seg.get("start_sec"),
+                "end_sec": seg.get("end_sec"),
+                "phashes": phashes,
+            }
+        )
+        print(
+            f"  {seg['segment_id']} "
+            f"[{seg.get('start_sec')}-{seg.get('end_sec')}s] "
+            f"phashes={len(phashes)} sample={phashes[:1]}"
+        )
 
     # 3) cluster_segments — group footage reused at multiple timestamps
     clustered = fns["cluster_segments"]({"segments": enriched}, context)
@@ -200,11 +228,17 @@ def main() -> int:
         print(f"  {c['cluster_id']}: {c['segment_ids']}{tag}")
 
     # 4) render_report — surfaces repeated_footage
-    report = fns["render_report"]({
-        "job_id": "job_local", "mode": "hybrid", "segments": enriched,
-        "clusters": clustered.get("clusters") or [], "ranked_candidates": [],
-        "output_format": "both",
-    }, context)
+    report = fns["render_report"](
+        {
+            "job_id": "job_local",
+            "mode": "hybrid",
+            "segments": enriched,
+            "clusters": clustered.get("clusters") or [],
+            "ranked_candidates": [],
+            "output_format": "both",
+        },
+        context,
+    )
     repeated = report["report_json"].get("repeated_footage") or []
     print("\n=== render_report ===")
     print("  repeated_footage:", [c["cluster_id"] for c in repeated] or "none")
@@ -212,16 +246,17 @@ def main() -> int:
     httpd.shutdown()
 
     # Verdict
-    multi = [c for c in (clustered.get("clusters") or [])
-             if len(c["segment_ids"]) > 1]
+    multi = [c for c in (clustered.get("clusters") or []) if len(c["segment_ids"]) > 1]
     ok_decode = analyzed.get("method") in ("shot_detection_pyav", "shot_detection")
     ok_phash = all(e["phashes"] for e in enriched) and bool(enriched)
     ok_cluster = bool(multi) if not args.video else True  # repeat only guaranteed
     print("\n=== VERDICT ===")
     print(f"  staged + decoded real file : {'OK' if ok_decode else 'FAIL'}")
     print(f"  real perceptual hashes     : {'OK' if ok_phash else 'FAIL'}")
-    print(f"  clustered repeated footage : "
-          f"{'OK' if ok_cluster else ('n/a' if args.video else 'FAIL')}")
+    print(
+        f"  clustered repeated footage : "
+        f"{'OK' if ok_cluster else ('n/a' if args.video else 'FAIL')}"
+    )
 
     if not args.keep and not args.video:
         os.remove(dest)

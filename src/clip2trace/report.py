@@ -63,8 +63,7 @@ def build_report(
     surfaced as `repeated_footage` (same footage reused at multiple timestamps).
     """
     kept = [c for c in ranked_candidates if not c.get("rejected")]
-    repeated = [c for c in (clusters or [])
-                if len(c.get("segment_ids") or []) > 1]
+    repeated = [c for c in (clusters or []) if len(c.get("segment_ids") or []) > 1]
     label_counts: Dict[str, int] = {}
     for c in kept:
         label_counts[c.get("confidence_label", "unknown")] = (
@@ -185,10 +184,13 @@ def render_html(report: Dict) -> str:
         items = "".join(
             f"<li><code>{esc(c.get('cluster_id'))}</code>: reused across "
             f"{esc(', '.join(c.get('segment_ids') or []))}</li>"
-            for c in repeated)
-        repeated_html = ("<h2>Repeated footage</h2>"
-                         "<p>Same footage detected at multiple timestamps:</p>"
-                         f"<ul>{items}</ul>")
+            for c in repeated
+        )
+        repeated_html = (
+            "<h2>Repeated footage</h2>"
+            "<p>Same footage detected at multiple timestamps:</p>"
+            f"<ul>{items}</ul>"
+        )
 
     out = (
         "<!doctype html>\n"

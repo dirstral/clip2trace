@@ -18,9 +18,7 @@ def handler(input_data, context):
     try:
         from clip2trace.report import build_report
 
-        report = build_report(
-            job_id, segments, ranked, mode=mode, clusters=clusters
-        )
+        report = build_report(job_id, segments, ranked, mode=mode, clusters=clusters)
     except Exception:
         kept = [c for c in ranked if not c.get("rejected")]
         report = {
@@ -31,8 +29,9 @@ def handler(input_data, context):
             ),
             "generated_mode": mode,
             "segments": segments,
-            "repeated_footage": [c for c in clusters
-                                 if len(c.get("segment_ids") or []) > 1],
+            "repeated_footage": [
+                c for c in clusters if len(c.get("segment_ids") or []) > 1
+            ],
             "ranked_candidates": kept,
             "caveats": [
                 "Global Telegram search is retrieval, not proof of origin.",
