@@ -81,6 +81,21 @@ def test_demo_segments_match_cached_candidate():
     assert not ranked[0]["rejected"]
     assert ranked[0]["confidence_label"] in ("plausible", "strong", "very_strong")
 
+    # seg_002 must NOT confidently match any cached candidate (honest "no source"):
+    seg2 = demo_segments()[1]
+    cands = _fixture("sample_telegram_results.json")
+    worst = []
+    for c in cands:
+        v2 = verify.handler({"segment_phashes": seg2["phashes"],
+                             "candidate_phashes": c.get("phashes", []),
+                             "segment_text": seg2.get("ocr_text", ""),
+                             "candidate_text": c.get("caption", "")}, {})
+        r2 = rank.handler({"candidates": [{"candidate_id": c["candidate_id"],
+                                           "verification": v2}]}, {})["ranked_candidates"]
+        assert v2["visual_score"] < 0.85, "seg_002 must not exact-match a candidate"
+        worst.append(r2[0]["rejected"])
+    assert all(worst), "seg_002 should be rejected against every candidate"
+
 
 def test_make_demo_fixture_check_passes():
     import subprocess

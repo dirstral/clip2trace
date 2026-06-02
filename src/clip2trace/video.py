@@ -131,7 +131,7 @@ DEMO_SEGMENTS = [
      "context_terms": ["demo", "street", "crowd"]},
     {"segment_id": "seg_002", "start_sec": 58.2, "end_sec": 67.0,
      "source_likelihood": 0.64, "reason": "candidate reused footage",
-     "phashes": ["0f0f0f0f0f0f0f0f"], "ocr_text": "",
+     "phashes": ["5a5a5a5a5a5a5a5a"], "ocr_text": "",
      "visible_handles": [], "context_terms": []},
 ]
 
