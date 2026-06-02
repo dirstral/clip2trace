@@ -275,26 +275,43 @@ spec:
                 if not segments:
                     try:
                         import av, numpy as np
+                        # Color-histogram shot detection: a static overlay cancels in
+                        # the histogram diff (unlike a grayscale pixel mean, which it
+                        # dilutes), and color separates same-luma scenes.
+                        def _feat(im):
+                            sc = max(1, int(max(im.shape[:2]) / 128))
+                            s = im[::sc, ::sc]; out = []
+                            for ch in range(3):
+                                h, _e = np.histogram(s[:, :, ch], bins=16, range=(0, 255))
+                                h = h.astype("float32"); tot = h.sum()
+                                out.append(h / tot if tot else h)
+                            return out
                         c = av.open(video_path)
                         try:
                             vs = c.streams.video[0]; tb = vs.time_base
-                            prev = None; cuts = [0.0]; last = 0.0; nxt = 0.0
+                            prev = None; last = 0.0; nxt = 0.0; ts = []; ds = []
                             for fr in c.decode(vs):
                                 tt = float(fr.pts * tb) if fr.pts is not None else last
                                 last = tt
                                 if tt + 1e-9 < nxt:
                                     continue
                                 nxt = tt + 1.0 / 3.0
-                                a = fr.to_ndarray(format="gray8")
-                                sc = max(1, int(max(a.shape) / 128))
-                                sm = a[::sc, ::sc].astype("float32") / 255.0
-                                if (prev is not None and prev.shape == sm.shape
-                                        and float(np.mean(np.abs(sm - prev))) > 0.3):
-                                    cuts.append(tt)
-                                prev = sm
+                                f = _feat(fr.to_ndarray(format="rgb24"))
+                                if prev is not None:
+                                    ds.append(float(np.mean(
+                                        [0.5 * np.abs(f[k] - prev[k]).sum()
+                                         for k in range(3)])))
+                                    ts.append(tt)
+                                prev = f
                             dur = float(vs.duration * tb) if vs.duration else last
                         finally:
                             c.close()
+                        cuts = [0.0]; lc = -1e9
+                        for i in range(len(ds)):
+                            lm = ((i == 0 or ds[i] >= ds[i - 1])
+                                  and (i + 1 >= len(ds) or ds[i] >= ds[i + 1]))
+                            if ds[i] > 0.25 and lm and ts[i] - lc >= 1.5:
+                                cuts.append(ts[i]); lc = ts[i]
                         b = sorted(set(cuts + [dur]))
                         wins = [{"start_sec": round(x, 2), "end_sec": round(y, 2)}
                                 for x, y in zip(b, b[1:]) if y - x > 0.1]
@@ -420,26 +437,43 @@ spec:
                     diagnostics.append("shot detection unavailable: %r" % (exc,))
                 try:
                     import av, numpy as np
+                    # Color-histogram shot detection (see analyze_input_video): a
+                    # static overlay cancels in the histogram diff and color separates
+                    # same-luma scenes, fixing under-segmentation of compilations.
+                    def _feat(im):
+                        sc = max(1, int(max(im.shape[:2]) / 128))
+                        s = im[::sc, ::sc]; out = []
+                        for ch in range(3):
+                            h, _e = np.histogram(s[:, :, ch], bins=16, range=(0, 255))
+                            h = h.astype("float32"); tot = h.sum()
+                            out.append(h / tot if tot else h)
+                        return out
                     c = av.open(video_path)
                     try:
                         vs = c.streams.video[0]; tb = vs.time_base
-                        prev = None; cuts = [0.0]; last = 0.0; nxt = 0.0
+                        prev = None; last = 0.0; nxt = 0.0; ts = []; ds = []
                         for fr in c.decode(vs):
                             tt = float(fr.pts * tb) if fr.pts is not None else last
                             last = tt
                             if tt + 1e-9 < nxt:
                                 continue
                             nxt = tt + 1.0 / 3.0
-                            a = fr.to_ndarray(format="gray8")
-                            sc = max(1, int(max(a.shape) / 128))
-                            sm = a[::sc, ::sc].astype("float32") / 255.0
-                            if (prev is not None and prev.shape == sm.shape
-                                    and float(np.mean(np.abs(sm - prev))) > 0.3):
-                                cuts.append(tt)
-                            prev = sm
+                            f = _feat(fr.to_ndarray(format="rgb24"))
+                            if prev is not None:
+                                ds.append(float(np.mean(
+                                    [0.5 * np.abs(f[k] - prev[k]).sum()
+                                     for k in range(3)])))
+                                ts.append(tt)
+                            prev = f
                         dur = float(vs.duration * tb) if vs.duration else last
                     finally:
                         c.close()
+                    cuts = [0.0]; lc = -1e9
+                    for i in range(len(ds)):
+                        lm = ((i == 0 or ds[i] >= ds[i - 1])
+                              and (i + 1 >= len(ds) or ds[i] >= ds[i + 1]))
+                        if ds[i] > 0.25 and lm and ts[i] - lc >= 1.5:
+                            cuts.append(ts[i]); lc = ts[i]
                     b = sorted(set(cuts + [dur]))
                     wins = [{"start_sec": round(x, 2), "end_sec": round(y, 2)}
                             for x, y in zip(b, b[1:]) if y - x > 0.1]

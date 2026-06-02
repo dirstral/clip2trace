@@ -30,24 +30,48 @@ def capabilities() -> dict:
 
 def _detect_shots_av(
     video_path: str,
-    threshold: float = 0.30,
+    threshold: float = 0.25,
     sample_fps: float = 3.0,
     max_dim: int = 128,
+    min_gap: float = 1.5,
+    bins: int = 16,
 ) -> List[dict]:
     """Lightweight shot detection with PyAV + numpy (no OpenCV).
 
-    Samples ~`sample_fps` downscaled grayscale frames and marks a cut when the
-    mean absolute frame-to-frame difference exceeds `threshold` (0..1).
+    Samples ~`sample_fps` downscaled RGB frames and scores each frame-to-frame
+    transition by the **color-histogram distance** — the mean over the 3 channels
+    of the total-variation distance between per-channel histograms (`0.5·Σ|hₐ−h_b|`,
+    in 0..1). A cut is marked where that distance exceeds `threshold`, is a local
+    maximum, and is ≥ `min_gap` seconds after the previous cut.
+
+    This replaces a grayscale mean-absolute-difference metric, which under-segmented
+    overlay-heavy / similar-brightness compilations: a persistent on-screen overlay
+    (logo/border/caption) is constant frame-to-frame and dilutes a global pixel
+    mean, whereas it cancels out in the histogram difference. Color also separates
+    scenes that share luma. See docs/research/runtime-diagnostics.md.
     """
     import av  # type: ignore
     import numpy as np  # type: ignore
 
+    def _feat(arr):
+        h, w = arr.shape[:2]
+        scale = max(1, int(max(h, w) / max_dim))
+        small = arr[::scale, ::scale]
+        feat = []
+        for ch in range(3):
+            hist, _ = np.histogram(small[:, :, ch], bins=bins, range=(0, 255))
+            hist = hist.astype("float32")
+            total = hist.sum()
+            feat.append(hist / total if total else hist)
+        return feat
+
     container = av.open(video_path)
+    times: List[float] = []
+    dists: List[float] = []
     try:
         stream = container.streams.video[0]
         tb = stream.time_base
         prev = None
-        cuts = [0.0]
         last_t = 0.0
         next_sample = 0.0
         step = 1.0 / sample_fps if sample_fps > 0 else 0.0
@@ -57,19 +81,27 @@ def _detect_shots_av(
             if t + 1e-9 < next_sample:
                 continue
             next_sample = t + step
-            arr = frame.to_ndarray(format="gray8")
-            h, w = arr.shape
-            scale = max(1, int(max(h, w) / max_dim))
-            small = arr[::scale, ::scale].astype("float32") / 255.0
-            if prev is not None and prev.shape == small.shape:
-                if float(np.mean(np.abs(small - prev))) > threshold:
-                    cuts.append(t)
-            prev = small
+            feat = _feat(frame.to_ndarray(format="rgb24"))
+            if prev is not None:
+                d = float(np.mean(
+                    [0.5 * np.abs(feat[ch] - prev[ch]).sum() for ch in range(3)]))
+                times.append(t)
+                dists.append(d)
+            prev = feat
         duration = (
             float(stream.duration * tb) if stream.duration else last_t
         ) or last_t
     finally:
         container.close()
+
+    cuts = [0.0]
+    last_cut = -1e9
+    for i, d in enumerate(dists):
+        local_max = (i == 0 or d >= dists[i - 1]) and (
+            i + 1 >= len(dists) or d >= dists[i + 1])
+        if d > threshold and local_max and times[i] - last_cut >= min_gap:
+            cuts.append(times[i])
+            last_cut = times[i]
 
     bounds = sorted(set(cuts + [duration]))
     windows = [

@@ -191,6 +191,23 @@ the console** (no reload API endpoint) before the new code loads.
    expect `method: "shot_detection_pyav"` and **real** perceptual hashes (not the demo
    `c3e1…`/`5a5a…`), plus repeated-footage clusters in the report.
 
+## Shot detection — color-histogram metric (2026-06-02)
+
+The PyAV+numpy shot detector (`_detect_shots_av` + the inline copies in
+`analyze_input_video`/`detect_source_segments`) scores each frame transition by the
+**mean per-channel color-histogram total-variation distance**, not a grayscale
+pixel-mean difference. Reason, found by exporting segment clips from real
+`samples/*.mkv` compilations: a grayscale mean-diff (fixed 0.30 threshold)
+**under-segmented** overlay-heavy / similar-luma news clips — two samples collapsed
+to a single segment because their peak grayscale diff was only 0.25 / 0.29. A
+persistent on-screen overlay (logo/border/caption) is constant frame-to-frame and
+*dilutes* a global pixel mean, whereas it cancels in the histogram difference; color
+also separates scenes that share brightness. After the change (threshold 0.25,
+local-max + 1.5 s min-gap), the five samples segment 4 / 6 / 14 / 17 / 19 (was
+4 / **1** / **1** / 8 / 6) — verified by eye that the new cuts land on real scene
+changes. Still numpy-only (no opencv on the worker). Inspect with
+`scripts/export_segments.py --all`.
+
 ## Graceful-degradation matrix (what clip2trace does when a capability is missing)
 
 clip2trace is built to **degrade, never crash**, when an optional runtime library
