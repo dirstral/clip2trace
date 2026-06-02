@@ -128,11 +128,28 @@ documented snake_case API properties:
   `visibility`, `enabledFunctions`, `enabledStores`.
 If `sinas validate` rejects any of these, adjust in `sinas-package.yaml`.
 
-## Validation results
+## Validation results (instance via-10, 2026-06-01)
 | Check | Result |
 |---|---|
-| `sinas validate` | NOT RUN — no Node + no instance/token (blocker) |
-| `sinas preview` | NOT RUN — same |
-| `sinas status` | NOT RUN — same |
-| Management API liveness | NOT RUN — no instance URL/token |
-| Local pytest (core logic) | **24 passed** (`uv run --with pytest pytest`) |
+| `sinas validate` | **✓ Valid** — both `sinas-package.yaml` and `sinas-config.yaml`. One fix needed: manifest `requiredResources` only accepts `agent\|collection\|function\|skill` (not `store`/`component`) — those are declared in `spec` and created at install. All other inferred fields (collection `metadataSchema`, store `description`/`visibility`, component `title`/`sourceCode`/`enabledFunctions`/`enabledStores`, variables, dependencies) validated as-is. |
+| `sinas preview` | **✓** `+42 created` (9 deps, 11 functions, 5 agents, 3 skills, 6 collections, 6 stores, 1 component, 1 manifest) + 2 roles from config |
+| `sinas install` | **✓ Installed** `clip2trace@0.1.0` (pkg id `355d61da-272f-4ee8-891d-13c21e00f1a8`), `errors: []`. Roles applied first, then package. |
+| LLM provider | **✓** Claude provider present (`anthropic`, default, active, id `8149b0ff-…`). `default_model` is `null` on the provider; agents pin `claude-sonnet-4-6` explicitly, so this is a minor console follow-up. |
+| Management API liveness | **✓** reachable; `/auth/me`, `/packages`, `/dependencies` all 200 |
+| Local pytest (core logic) | **62 passed** (`uv run --with pytest pytest`) |
+| Package structure (offline) | `tests/test_package_structure.py` — manifest↔spec + agent/component refs resolve |
+| Inline-block runnability (offline) | `tests/test_package_inline_sync.py` — every inline `code:` block execs + runs |
+
+### Known live-instance gotchas found during deploy
+- **`@sinas/cli` cannot pass install-time `variables`** (no flag; it always sends
+  `null`), so `sinas install` 400s on the required `PRIMARY_LLM`. Workaround:
+  `scripts/sinas_install.py` calls the same Management API (`POST
+  /api/v1/packages/install`) with the `variables` object. Roles still go through
+  `sinas install` / config-apply.
+- **Scoped API keys hit resource-level 403** ("Not authorized to read/execute
+  this resource") on package-installed functions even with `sinas.functions.*:all`
+  — the function list returns `[]` and single read/execute are denied for the key
+  principal. Execute functions/agents from the **console UI** (full user session)
+  or investigate per-resource visibility. Deploy itself is unaffected.
+- `sinas status` → 404 on `/api/v1/manifests/clip2trace/clip2trace/status` (the
+  manifest exists; the status endpoint path/availability differs on this build).

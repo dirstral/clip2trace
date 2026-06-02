@@ -84,6 +84,23 @@ def is_rejected(score: float) -> bool:
     return clamp01(score) < REJECT_THRESHOLD
 
 
+def evidence_from_signals(*, visual: float = 0.0, text: float = 0.0,
+                          temporal: float = 0.0, handle: float = 0.0,
+                          predates: float = 0.0, channel: float = 0.0,
+                          forward: float = 0.0) -> Dict[str, float]:
+    """Map pipeline signals (e.g. a verify_media_similarity result) onto the
+    rubric's evidence dimensions. All values are clamped to [0, 1]."""
+    return {
+        "visual_similarity": clamp01(visual),
+        "ocr_caption_query": clamp01(text),
+        "temporal_alignment": clamp01(temporal),
+        "handle_watermark": clamp01(handle),
+        "predates_input": clamp01(predates),
+        "channel_relevance": clamp01(channel),
+        "forward_repost": clamp01(forward),
+    }
+
+
 @dataclass
 class RankedResult:
     candidate_id: str

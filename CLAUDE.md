@@ -125,8 +125,7 @@ are not part of the clip2trace workflow — ignore them unless explicitly asked.
 - **Telegram is risky** — `channels.searchPosts` is user-account only, free-text is metered/paid, flood-waits happen. Always keep the demo/cached/manual fallback; the search function must surface `live_unavailable` explicitly and **never silently fake a live search**.
 - **Never commit secrets or media**: `.env`, `.sinas/`, `*.session`, session strings, Telegram credentials, downloaded media, private datasets. All are gitignored — keep it that way.
 - Prefer **small, testable functions** over one giant handler. If behaviour changes, update tests and docs in the same change.
-- **Never commit or push directly to `main`.** Always work on a feature branch and open a **PR** against `main` (use the `github` MCP — `create_branch`, `create_pull_request`), then let it be reviewed/merged. End every commit message with the trailer:
-  `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
+- **Never commit or push directly to `main`.** Always work on a feature branch and open a **PR** against `main` (use the `github` MCP — `create_branch`, `create_pull_request`), then let it be reviewed/merged.
 
 ## Issue & ownership workflow
 
@@ -152,8 +151,12 @@ Issues live in `dirstral/clip2trace` (GitHub). Canonical issue source is
 
 ## Known gotchas / blockers
 
-- **No Sinas instance number (X) or admin token** available to automation → `sinas validate/preview/status`, live API checks, and Claude provider/default-model verification cannot run. URLs stay as env vars (`SINAS_BASE_URL=https://via-X.sinas.wearebrain.com`, console `:51245`). See [docs/research/sinas-investigation.md](docs/research/sinas-investigation.md).
-- **No Node/npm here** → `@sinas/cli` can't run locally; use the Management API fallback or a machine with Node.
+- **Instance is `via-10`** (`SINAS_BASE_URL=https://via-10.sinas.wearebrain.com`, console `:51245`). Node/npm + `@sinas/cli` are installed; `sinas login` writes `~/.sinas/config.json`. The package is **installed** (`clip2trace@0.1.0`, validated + deployed 2026-06-01). See [docs/research/sinas-investigation.md](docs/research/sinas-investigation.md).
+- **`@sinas/cli` can't pass install-time variables** (no flag → sends `null`), so `sinas install` 400s on the required `PRIMARY_LLM`. Use **`scripts/sinas_install.py`** (Management API `POST /api/v1/packages/install` with a `variables` object). `PRIMARY_LLM` = the LLM provider name (`Claude`).
+- **Scoped API keys get resource-level 403** on package-installed functions even with `sinas.functions.*:all` (list returns `[]`, single read/execute denied). **Execute functions/agents from the console UI** (full user session), not the CLI key — or investigate per-resource visibility.
+- **Functions have no runtime address** — `context` gives `access_token` but **no base URL**, and there's no preinstalled `sinas` SDK (verified via `diagnose_runtime` env/context dump), so a function **cannot call back** to `/states` or `/files`. **Persistence is agent-layer**: functions are pure transforms that return data; the agents (which declare `enabledStores`/`enabledCollections` readwrite) persist job state → `clip2trace/jobs`, segments → `clip2trace/segments`, report → `clip2trace/reports`.
+- **Workers are pip-only** — no way to add system libs (`libGL`) or binaries (`ffmpeg`/`tesseract`) to the managed image (docs `admin/system.md`). So the video pipeline is **pip-only by design**: decode/keyframes via **PyAV** (`av`, bundles ffmpeg), shot detection via a **PyAV+numpy** frame-diff detector, hashing via **Pillow+imagehash** (no opencv), OCR via **Claude vision** through `/adapters/openai/v1/chat/completions`. opencv/scenedetect/tesseract are preferred-if-present (optional, operator-provisioned — #33). After approving deps, click **Reload Workers** so they load.
+- **Manifest `requiredResources`** only accepts `agent|collection|function|skill` (not `store`/`component`) — those are declared in `spec` and created at install. `sinas status` 404s on the manifest-status endpoint on this build.
 - **Sinas package field caveats**: `MAX_VIDEO_MB` is a `text` variable (no numeric type); secret variables can't be conditionally required, so Telegram secrets are `required: false` and enforced at runtime instead.
 - **Telegram session string = full account access.** Generate it once locally with `scripts/bootstrap_telegram_session.py`, store as a Sinas secret, rotate if leaked.
 - clip2trace is **AGPL-3.0-or-later** (matches the Sinas platform/CLI/skills). The official skills are installed locally and gitignored to stay upstream-fresh, not for license reasons.

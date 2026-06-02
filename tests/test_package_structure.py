@@ -1,0 +1,129 @@
+"""#5/#6 — offline structural guards for sinas-package.yaml.
+
+Catches manifest/agent/component reference drift without a live instance.
+Field-NAME correctness (camelCase inferred for collections/stores/components)
+still requires `sinas validate`; see docs/research/sinas-investigation.md.
+"""
+
+import os
+
+import pytest
+
+yaml = pytest.importorskip("yaml")
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PKG = os.path.join(ROOT, "sinas-package.yaml")
+
+# resource `type` -> spec section key
+TYPE_TO_SECTION = {
+    "function": "functions", "agent": "agents", "skill": "skills",
+    "collection": "collections", "store": "stores", "component": "components",
+}
+# Only these types are allowed in a manifest's requiredResources (per `sinas
+# validate`). Stores + components are declared in spec and created at install,
+# but are NOT manifest-tracked.
+MANIFEST_TYPES = {"function", "agent", "skill", "collection"}
+EXPECTED_COLLECTIONS = {"input-videos", "source-segments", "keyframes",
+                        "telegram-media", "reports", "demo-fixtures"}
+EXPECTED_STORES = {"jobs", "segments", "search-results", "candidate-matches",
+                   "query-cache", "runtime-diagnostics"}
+
+
+def _spec():
+    with open(PKG) as f:
+        return yaml.safe_load(f)["spec"]
+
+
+def _declared(spec):
+    return {t: {r["name"] for r in (spec.get(sec) or [])}
+            for t, sec in TYPE_TO_SECTION.items()}
+
+
+def _name(ref):
+    """`clip2trace/foo` -> `foo`."""
+    return str(ref).split("/", 1)[-1]
+
+
+def test_expected_collections_and_stores_declared():
+    decl = _declared(_spec())
+    assert EXPECTED_COLLECTIONS <= decl["collection"]
+    assert EXPECTED_STORES <= decl["store"]
+    assert "dashboard" in decl["component"]
+
+
+def test_manifest_references_resolve_both_ways():
+    spec = _spec()
+    decl = _declared(spec)
+    manifest = spec["manifests"][0]
+    required = manifest["requiredResources"]
+
+    # every manifest entry uses an allowed type and resolves to a declared resource
+    manifest_by_type = {t: set() for t in MANIFEST_TYPES}
+    for r in required:
+        t = r["type"]
+        assert t in MANIFEST_TYPES, (
+            f"manifest requiredResources type '{t}' not allowed "
+            f"(must be one of {sorted(MANIFEST_TYPES)})")
+        assert r["name"] in decl[t], f"manifest references missing {t}: {r['name']}"
+        manifest_by_type[t].add(r["name"])
+
+    # every declared resource of a manifest-trackable type appears in the manifest
+    for t in MANIFEST_TYPES:
+        missing = decl[t] - manifest_by_type[t]
+        assert not missing, f"declared {t}(s) absent from manifest: {missing}"
+
+
+def test_agent_and_component_enabled_refs_resolve():
+    spec = _spec()
+    decl = _declared(spec)
+
+    for agent in spec.get("agents") or []:
+        for fn in agent.get("enabledFunctions") or []:
+            assert _name(fn) in decl["function"], \
+                f"{agent['name']} enables missing function {fn}"
+        for sk in agent.get("enabledSkills") or []:
+            ref = sk["skill"] if isinstance(sk, dict) else sk
+            assert _name(ref) in decl["skill"], \
+                f"{agent['name']} enables missing skill {ref}"
+        for st in agent.get("enabledStores") or []:
+            ref = st["store"] if isinstance(st, dict) else st
+            assert _name(ref) in decl["store"], \
+                f"{agent['name']} enables missing store {ref}"
+        for col in agent.get("enabledCollections") or []:
+            ref = col["collection"] if isinstance(col, dict) else col
+            assert _name(ref) in decl["collection"], \
+                f"{agent['name']} enables missing collection {ref}"
+
+    for comp in spec.get("components") or []:
+        for fn in comp.get("enabledFunctions") or []:
+            assert _name(fn) in decl["function"], \
+                f"{comp['name']} enables missing function {fn}"
+        for st in comp.get("enabledStores") or []:
+            ref = st["store"] if isinstance(st, dict) else st
+            assert _name(ref) in decl["store"], \
+                f"{comp['name']} enables missing store {ref}"
+
+
+def _agent(spec, name):
+    return next(a for a in spec["agents"] if a["name"] == name)
+
+
+def test_persistence_owning_agents_have_required_access():
+    """Persistence is agent-layer (functions are pure). Guard the access grants."""
+    spec = _spec()
+
+    def store_access(agent, store):
+        for s in agent.get("enabledStores") or []:
+            if _name(s["store"]) == store:
+                return s.get("access")
+        return None
+
+    coordinator = _agent(spec, "coordinator")
+    assert store_access(coordinator, "jobs") == "readwrite", \
+        "coordinator must read/write the jobs store (job lifecycle persistence)"
+
+    report_writer = _agent(spec, "report-writer")
+    assert store_access(report_writer, "jobs") == "readwrite", \
+        "report-writer must write the final job status"
+    cols = {_name(c["collection"]) for c in report_writer.get("enabledCollections") or []}
+    assert "reports" in cols, "report-writer must access the reports collection"

@@ -1,7 +1,9 @@
-"""analyze_input_video — high-level orchestration of input-video analysis.
+"""analyze_input_video — produce candidate source segments for a job.
 
-Reads input metadata, then (intended) calls detect_source_segments and
-extract_segment_clues. In demo mode returns fixture-shaped output.
+Thin orchestrator: runs segment detection (shot detection → uniform windows →
+demo fixture) and returns timestamped segments. Per-segment clues are produced
+by extract_segment_clues (called next by the coordinator). Long videos should be
+invoked via /execute/async; see docs/architecture.md.
 """
 
 from __future__ import annotations
@@ -13,12 +15,48 @@ def handler(input_data, context):
     if not job_id:
         return {"error": "job_id is required"}
     mode = input_data.get("mode", "demo")
+    video_path = input_data.get("video_path")
+    duration = input_data.get("duration_sec")
+    diagnostics = []
+
+    segments = []
+    method = "demo_fixture"
+    if video_path:
+        try:
+            from clip2trace.video import detect_shots, windows_to_segments
+            segments = windows_to_segments(
+                detect_shots(video_path), likelihood=0.5,
+                reason="shot boundary; candidate reused footage")
+            method = "shot_detection"
+        except Exception as exc:
+            diagnostics.append(f"shot detection unavailable: {exc!r}")
+
+    if not segments and duration:
+        try:
+            from clip2trace.video import uniform_windows, windows_to_segments
+            segments = windows_to_segments(
+                uniform_windows(float(duration)), likelihood=0.3,
+                reason="uniform window; candidate reused footage")
+            method = "uniform_windows"
+        except Exception as exc:
+            diagnostics.append(f"uniform fallback failed: {exc!r}")
+
+    if not segments:
+        try:
+            from clip2trace.video import demo_segments
+            segments = demo_segments()
+        except Exception:
+            segments = [
+                {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
+                 "source_likelihood": 0.81, "reason": "candidate reused footage"},
+            ]
+
     return {
         "job_id": job_id,
         "status": "analyzed",
         "mode": mode,
-        "segments_ref": f"clip2trace/segments/{job_id}",
-        "next_step": "detect_source_segments",
-        "note": ("stub: orchestrate detect_source_segments + "
-                 "extract_segment_clues; returns fixture in demo mode"),
+        "method": method,
+        "segments": segments,
+        "diagnostics": diagnostics,
+        "next_step": "extract_segment_clues",
     }

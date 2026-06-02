@@ -42,25 +42,113 @@ Notes on the local box (developer machine):
   deps). `telethon` and `opencv`/`scenedetect` are optional extras (not installed).
 - Node/npm are also absent → `@sinas/cli` cannot run here.
 
-## Sinas runtime — PENDING (blocked on instance access)
+## Sinas runtime — PROBED on via-10 (2026-06-02, shared pool)
 
-The values that drive design decisions must come from running `diagnose_runtime`
-**on the instance**. Until then, design against the documented container limits:
+Authoritative `clip2trace/diagnose_runtime` output **after clicking "Reload
+Workers"** (console execution `7d9c2424-…`; an initial probe `9df46078-…` before
+reload reported all modules `false`, so the reload step is required after install):
 
-| Capability | Local dev | Sinas runtime (to confirm) | Design implication |
+```json
+{
+  "python": "3.11.15",
+  "modules": {"av": true, "cv2": false, "scenedetect": false, "imagehash": true,
+              "PIL": true, "numpy": true, "telethon": true,
+              "rapidfuzz": true, "dateutil": true, "requests": true},
+  "tools": {"ffmpeg": false, "tesseract": false},
+  "tmp_dir": "/tmp", "tmp_free_bytes": 104849408,
+  "has_access_token": true, "secrets_available": true
+}
+```
+
+| Capability | via-10 (measured, post-reload) | Design implication |
+|---|---|---|
+| Python | **3.11.15** | core lib targets >=3.10 ✓ |
+| `/tmp` free | **104,849,408 B = exactly 100 MiB** | confirms the 100 MB `/tmp` cap — chunk/bound everything |
+| `access_token` / `secrets` in context | **true / true** (`sharedPool` fn) | functions can call back to Sinas; Telegram fns get secrets in the trusted pool |
+| numpy, Pillow, imagehash | **importable** | real perceptual hashing works on supplied/extracted frames |
+| rapidfuzz | **importable** | real fuzzy text-overlap scoring (not the Jaccard fallback) |
+| telethon | **importable** | live Telegram search is technically available (Ark; still needs a user session + secrets) |
+| requests, dateutil | **importable** | API calls + date parsing work |
+| **cv2 (opencv), scenedetect** | **NOT importable** | shot detection + keyframe *extraction* stay on the uniform-window / supplied-phash fallback. opencv-headless usually needs a system lib (e.g. `libGL`) in the worker image |
+| ffmpeg / tesseract | **absent** | video decode + OCR degrade to fallbacks (regex handles, supplied phashes) |
+
+**Key takeaways:**
+- After install you **must click "Reload Workers"** for declared deps to load into
+  the worker pool (first probe showed all `false`; after reload, 7/9 import).
+- Sinas workers accept **pip packages only** — there is no supported way to add
+  system libs (`libGL`) or binaries (`ffmpeg`/`tesseract`) to the managed image
+  (docs `admin/system.md`, `functions.md`). So `cv2`/`scenedetect` (which need
+  `libGL`) and `ffmpeg`/`tesseract` can't be self-served.
+- **Resolution (full pipeline, pip-only):** clip2trace now decodes via **PyAV**
+  (`av` — its wheel bundles ffmpeg, no system libs), detects shots via a
+  **PyAV+numpy** frame-diff detector, hashes via **Pillow+imagehash+numpy**, and
+  does OCR via **Claude vision** through the OpenAI adapter (no tesseract binary).
+  So the entire real-video pipeline runs on the managed worker with the
+  pip-installable deps that already load. opencv/scenedetect/tesseract stay as the
+  *preferred* path when present.
+
+**Confirmed on-instance (2026-06-02):** `av: true` in the worker — so PyAV decode,
+the PyAV+numpy shot detector, and PIL/imagehash hashing all run on the managed
+worker. The full visual pipeline is live with **zero infra changes**.
+
+**Claude-vision OCR — WORKING (2026-06-02).** Resolved end-to-end:
+- The Claude provider's **default model was set to `claude-sonnet-4-6`** in the
+  console (was `null`), so the adapter resolves the model (`200`).
+- The Sinas OpenAI adapter (`POST /adapters/openai/v1/chat/completions`) routes the
+  model by name but expects **Anthropic-native content blocks** for images: the
+  OpenAI `image_url` shape returns `500`, while
+  `{"type":"image","source":{"type":"base64","media_type":"image/png","data":…}}`
+  returns `200`. `clip2trace.ocr` sends that block.
+- Verified live: `ocr_image(frame, base_url, token)` on a rendered frame returned
+  `"LIVE FROM DEMO @demo_channel"`. OCR still falls back to regex `@handle`
+  extraction if the LLM is unavailable.
+- Routing note: the adapter maps `model:"namespace/name"` to an **agent** instead
+  of a direct-LLM call.
+
+**Function runtime address — there is none (persistence is agent-layer).** The
+probe also dumped `env_keys` + `context_keys`: a function gets
+`context["access_token"]` but **no base URL** anywhere (`env_keys` = HOME, PATH,
+WORKER_ID, WORKER_MODE, SINAS_CONTAINER_MODE, … ; `context_keys` = access_token,
+execution_id, secrets, user_id, …). There's no preinstalled `sinas` SDK either.
+So a function **cannot call back** to `POST /states` / `POST /files/...` — it can't
+construct the URL. This matches the package design: **functions declare no store
+access; agents do** (`coordinator`/`report-writer` carry `enabledStores` /
+`enabledCollections` readwrite). **Decision: persistence is agent-layer** — functions
+are pure transforms that return data, and the orchestrating agents persist it
+(job lifecycle → `clip2trace/jobs`, segments → `clip2trace/segments`, report →
+`clip2trace/reports`). (Keyframe *image* files aren't stored — functions return
+perceptual hashes, which is what visual verification needs; raw-frame upload would
+require the missing function runtime address.) See the agent prompts in
+`sinas-package.yaml` + `agents/*.md`.
+
+**Follow-up (#33, OPTIONAL acceleration — operator-only):** if the Sinas/WeAreBrain
+operator ever adds `libGL`+opencv/scenedetect and `ffmpeg`/`tesseract` to the
+managed worker image, clip2trace uses them automatically for faster native
+decode/shot-detection/OCR. **Not required** — the pip-only path above is the
+supported, working route.
+
+Documented container ceilings (design against these): **512 MB RAM, 1 GB disk,
+100 MB `/tmp` (confirmed), 300 s timeout.**
+
+## Graceful-degradation matrix (what clip2trace does when a capability is missing)
+
+clip2trace is built to **degrade, never crash**, when an optional runtime library
+or tool is absent. Every heavy dependency is imported lazily, and each pipeline
+step has a documented fallback. This is what makes the whole pipeline testable and
+demoable offline (see the test suite + `docs/demo-plan.md`).
+
+| Capability | Used by | When absent → fallback | Where |
 |---|---|---|---|
-| Python | 3.14.5 | confirm via probe | core lib targets >=3.10 |
-| ffmpeg | absent | likely needed for decode | if absent, request as approved dep / system tool |
-| tesseract | absent | unknown | OCR optional; regex-handle fallback always works |
-| OpenCV | absent | needs `opencv-python-headless` (approved dep) | keyframe extraction degrades gracefully |
-| imagehash/Pillow | present | needs approved dep | perceptual hashing |
-| Telethon | absent | needs approved dep + sharedPool | live search only |
-| `/tmp` free | ~52 GB | **100 MB tmpfs** | chunk video; bound downloads |
-| disk | ample | **1 GB** | never store full corpora in-function |
-| RAM | ample | **512 MB** | process frames streaming, not whole video |
-| timeout | n/a | **300 s** | long videos → async + chunking |
-| `access_token` | n/a | present in context | use for API calls back to Sinas |
-| `secrets` | n/a | **shared-pool only** | Telegram functions must be `sharedPool: true` |
+| `scenedetect` | shot detection | uniform fixed-window segmentation (needs `duration_sec`), else deterministic demo segments | `detect_shots`/`uniform_windows` in `src/clip2trace/video.py`; `functions/detect_source_segments.py` |
+| `opencv` (`cv2`) | keyframe extraction | skip extraction; use phashes supplied in the request (demo/cached) | `extract_keyframes` in `video.py`; `functions/extract_segment_clues.py` |
+| `imagehash`/`Pillow` | perceptual hashing | `phash_of_frame`/`center_crop_phash` return `None`; supplied phashes still used | `video.py` |
+| `tesseract`/`pytesseract` | OCR text | `ocr_available=false`; regex `@handle` + context-term extraction from supplied text still run | `functions/extract_segment_clues.py` |
+| `rapidfuzz` | text overlap score | Jaccard token-overlap fallback | `text_overlap_score` in `src/clip2trace/matching.py` |
+| `telethon` + secrets | live Telegram search | explicit `live_unavailable` status (never a silent fake); demo/cached/manual paths still work | `functions/search_global_telegram_posts.py` (Ark) |
+| `ffmpeg` | video decode (under opencv) | bounded by the above video fallbacks; flagged here for dep-approval | runtime tool |
+
+The `diagnose_runtime` function reports exactly which of these are importable on
+the instance, so the above fallbacks can be predicted before a run.
 
 ## Blockers / follow-ups
 - Run `diagnose_runtime` on the instance and paste real output here.

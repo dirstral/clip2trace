@@ -53,7 +53,9 @@ def test_all_functions_import_and_run():
         assert hasattr(mod, "handler"), f"{name} missing handler"
         out = mod.handler(MINIMAL_INPUT.get(name, {}), {"execution_id": "test"})
         assert isinstance(out, dict), f"{name} did not return a dict"
-        assert "error" not in out, f"{name} returned error: {out.get('error')}"
+        # A truthy `error` signals failure; a nullable `error: None` field
+        # (e.g. in create_job's job-state shape) is fine.
+        assert not out.get("error"), f"{name} returned error: {out.get('error')}"
 
 
 def test_handle_extraction_in_clues():
