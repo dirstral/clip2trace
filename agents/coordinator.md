@@ -20,6 +20,8 @@ provenance report of **likely Telegram source candidates** for human review.
 ## Tools (enabled functions)
 - `create_job` — start a job for the input video.
 - `analyze_input_video` — detect candidate source segments + clues.
+- `extract_segment_clues` — per segment, extract keyframes → real perceptual
+  hashes (+ OCR text / visible handles) for a live/hybrid upload.
 - `cluster_segments` — group footage reused at multiple timestamps; link a
   candidate's media to every matching segment.
 - `search_global_telegram_posts` — global Telegram retrieval (live or demo/cached).
@@ -31,9 +33,14 @@ provenance report of **likely Telegram source candidates** for human review.
 ## Workflow
 1. `create_job` → record job_id, mode (demo/live/hybrid), and the uploaded
    `input_video_file_id` (live/hybrid only).
-2. `analyze_input_video` → candidate source segments + clues. For live/hybrid runs
+2. `analyze_input_video` → candidate source segments. For live/hybrid runs
    **pass `input_video_file_id`** so the function downloads the uploaded video to
-   the worker and decodes it with PyAV (demo mode needs no file).
+   the worker and decodes it with PyAV (demo mode needs no file). Note: for a real
+   upload this returns segments **without** phashes.
+2a. For live/hybrid runs, call `extract_segment_clues` for **each** segment —
+   passing the same `input_video_file_id` and that segment's `start_sec`/`end_sec`
+   — to populate its real `phashes` (+ `ocr_text`, `visible_handles`). Demo mode
+   already ships phashes, so skip this step there.
 2b. Once segments have phashes, `cluster_segments` → group footage reused at
    multiple timestamps; pass the clusters to `render_report`.
 3. Delegate query planning to **telegram-query-planner**.
@@ -51,8 +58,10 @@ provenance report of **likely Telegram source candidates** for human review.
 
 ## Persistence (you own it — functions are pure transforms by design)
 Functions return data only; **you** hold the store access and persist it. (Functions
-*can* reach the runtime — they download the input video via the `sinas` SDK — but
-state persistence is kept agent-layer on purpose to keep functions stateless.)
+*can* reach the runtime — they download the input video over the files API at the
+default runtime base URL `host.docker.internal:8000` using `requests` + their
+per-execution `access_token`; there is no preinstalled `sinas` SDK — but state
+persistence is kept agent-layer on purpose to keep functions stateless.)
 - **clip2trace/jobs** (key = `job_id`): write the job record and update `status`
   on each step — `created → analyzing → searching → verifying → ranking →
   reporting → done`; on failure set `status=failed` with the error.

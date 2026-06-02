@@ -125,8 +125,17 @@ client = SinasClient(base_url="http://host.docker.internal:8000",
 This is corroborated on-instance: Claude-vision OCR already works from inside
 `extract_segment_clues` by POSTing to `{base}/adapters/openai/v1/chat/completions`
 (see the OCR section above). So a function **can** `GET /files/...` (input delivery,
-#36) and could `POST /states` if needed. (`diagnose_runtime` now also probes
-`"sinas"` so SDK availability is confirmed directly on via-10.)
+#36) and could `POST /states` if needed.
+
+> **Correction (2026-06-02, measured):** `diagnose_runtime` now probes `"sinas"`
+> and reports **`"sinas": false`** on via-10 — the `sinas` SDK is **NOT** preinstalled
+> in the worker, contrary to the skill note above. This does **not** change the
+> conclusion: functions reach the runtime with **`requests`** (which *is* importable)
+> against the hardcoded default base `http://host.docker.internal:8000`, using their
+> per-execution `access_token`. Input delivery (#36) was confirmed working this way
+> (`_stage_input_video` → `requests.get(.../files/...)`), so the `from sinas import
+> SinasClient` snippet above is illustrative only — the shipped code does not depend
+> on it.
 
 **Persistence stays agent-layer — by design choice, not impossibility.** The package
 keeps **functions as pure transforms** that return data, while the orchestrating
@@ -223,13 +232,98 @@ an additional filter on top of permissions, not a replacement.
 **installed** (`POST /api/v1/packages/install` → 200). Workers must be **reloaded in
 the console** (no reload API endpoint) before the new code loads.
 
-### Pending on-instance capture (console UI, full user session)
-1. Click **Reload Workers**; execute `diagnose_runtime` → confirm `"sinas": true`.
-2. Upload a small (<90 MB) real video to `clip2trace/input-videos`; note its `name`.
-3. Run the **coordinator** agent in **hybrid** mode with `input_video_file_id=<name>`
-   (Telegram stays cached/demo — live disabled, no session). Paste the result here:
-   expect `method: "shot_detection_pyav"` and **real** perceptual hashes (not the demo
-   `c3e1…`/`5a5a…`), plus repeated-footage clusters in the report.
+### On-instance hybrid capture — DONE (console UI, full user session, 2026-06-02)
+
+Run end-to-end from the console (full Admins session; the only path that executes
+package resources — see #44). Uploaded `Israel captures castle in Lebanon
+[CtaT27mc3bU].mkv` (2.5 MB, `video/matroska`, private) to `clip2trace/input-videos`.
+
+**1. `diagnose_runtime` (post-install, exec `6a08ac4c-…`)** — the PyAV+hash path is
+live; note `cv2`/`scenedetect`/`ffmpeg`/`tesseract`/`sinas` all `false`:
+
+```json
+{"python": "3.11.15",
+ "modules": {"av": true, "cv2": false, "scenedetect": false, "imagehash": true,
+             "PIL": true, "numpy": true, "telethon": true, "rapidfuzz": true,
+             "dateutil": true, "requests": true, "sinas": false},
+ "tools": {"ffmpeg": false, "tesseract": false},
+ "tmp_dir": "/tmp", "tmp_free_bytes": 104845312,
+ "has_access_token": true, "secrets_available": true,
+ "context_keys": ["access_token","chat_id","execution_id","secrets",
+                  "trigger_type","user_email","user_id"]}
+```
+
+**2. `coordinator` agent, HYBRID mode, `input_video_file_id` = the uploaded name**
+→ `analyze_input_video` (job `job_09d6af2d-…`). Real input delivery + real PyAV shot
+detection both succeed:
+
+```json
+{"status": "analyzed", "mode": "hybrid", "method": "shot_detection_pyav",
+ "segments": [
+   {"segment_id": "seg_001", "start_sec": 0.0,   "end_sec": 5.81},
+   {"segment_id": "seg_002", "start_sec": 5.81,  "end_sec": 11.98},
+   {"segment_id": "seg_003", "start_sec": 11.98, "end_sec": 14.52},
+   {"segment_id": "seg_004", "start_sec": 14.52, "end_sec": 18.95}],
+ "diagnostics": [
+   "staged input video Israel captures castle in Lebanon [CtaT27mc3bU].mkv",
+   "shot detection unavailable: ImportError('libxcb.so.1: cannot open shared object file: No such file or directory')"],
+ "next_step": "extract_segment_clues"}
+```
+
+- `diagnostics[0]` = **input delivery works** (#36): the worker downloaded + staged
+  the real upload to `/tmp` via `requests` (URL-encoded name; no `sinas` SDK).
+- `method: "shot_detection_pyav"` with **4 real, irregular scene cuts** — these match
+  the local `scripts/export_segments.py` boundaries for this clip exactly
+  (`0.0 / 5.8 / 12.0 / 14.5 / 18.9 s`), i.e. a genuine real decode, not the demo
+  fixtures.
+- `diagnostics[1]` `libxcb.so.1` is **benign**: it's only the optional first-choice
+  `scenedetect`/opencv path failing (those need `libGL`/`libxcb`, absent by design —
+  cf. #33). The PyAV+numpy detector is the supported route and it succeeded.
+
+**3. Real perceptual hashes + OCR — `extract_segment_clues` (run directly, execs
+`ea0377fd-…` seg_001, `0bf9ca42-…` seg_003).** Real, content-distinct phashes and
+real on-screen text (Claude vision, no tesseract):
+
+```json
+// seg_001 (0.0–5.81s)
+{"segment_id": "seg_001",
+ "phashes": ["9c93252d74d38bca","85d4d24b2b3e28cf","9c93252d3cd38bca",
+             "c5d4d2492b3e28cf","9c93252d74d38bca","85d4d24b2b3e28cf"],
+ "ocr_text": "DEMOCRACY NOW!  Israeli troops captured a Crusades-era castle in southern Lebanon,",
+ "ocr_available": true,
+ "diagnostics": ["staged input video Israel captures castle in Lebanon [CtaT27mc3bU].mkv"]}
+
+// seg_003 (11.98–14.52s)
+{"segment_id": "seg_003",
+ "phashes": ["aa293587d4e5d368","b1173b140fa761ba","aaae1584b519b95e",
+             "ac445ae565d556ca","aa3d25c5723d932a","cb152ad46bd546e8"],
+ "ocr_text": "DEMOCRACY NOW!  It was previously held by Israeli forces during their 1982-2000 occupation of southern Lebanon",
+ "ocr_available": true,
+ "diagnostics": ["staged input video Israel captures castle in Lebanon [CtaT27mc3bU].mkv"]}
+```
+
+6 phashes per segment = 3 keyframes × (full + 0.6 center-crop), via PyAV keyframe
+extraction + `imagehash`. seg_001 vs seg_003 differ entirely → real, not the demo
+`c3e1…`/`5a5a…`.
+
+**Wiring bug found + fixed (PR #46).** The first coordinator run produced **empty
+phashes** (so `cluster_segments` returned 4 singleton clusters) because
+`extract_segment_clues` was **not** in the coordinator's `enabledFunctions` (it lived
+only on `source-segment-analyst`), and the coordinator prompt wrongly assumed
+`analyze_input_video` returns phashes. PR #46 adds the function to the coordinator and
+updates its prompt/workflow to call it per segment (between `analyze_input_video` and
+`cluster_segments`); the direct runs above prove the phash path works on-instance.
+
+**#44 status (unchanged).** This whole capture was driven from the **console browser
+session** — package functions/agents executed fine there. The **API-token** path is
+still blocked (resource-level 403 on package-installed resources); only
+`/api/v1/packages/{preview,install}` accept the admin token. So an automated
+(SDK/dashboard/CI) demo remains blocked pending the operator fix in #44.
+
+**Remaining hand-off (1 step).** After PR #46 merges and the package is reinstalled
+(`scripts/sinas_install.py`), a **single** coordinator hybrid pass should yield real
+phashes + clusters without the manual `extract_segment_clues` calls — re-run the
+console chat once and paste that one-pass output here to fully close the loop.
 
 ## Shot detection — color-histogram metric (2026-06-02)
 
@@ -276,10 +370,15 @@ the instance, so the above fallbacks can be predicted before a run.
   documented) is met by the capability table above.
 - Dependency-approval follow-ups were filed: **#33** (operator-only system libs —
   `libGL`/opencv/scenedetect, `ffmpeg`/`tesseract`; optional acceleration, not
-  required) and **#36** (uploaded-video → worker input delivery, now wired via the
-  `sinas` SDK / `host.docker.internal:8000` files API — see the corrected runtime-address
-  note above).
-- Re-run after the #36 change to confirm `"sinas": true` in the module probe and to
-  capture the on-instance hybrid run (real video → segments → real phashes → report).
+  required) and **#36** (uploaded-video → worker input delivery, wired via
+  `requests` against the `host.docker.internal:8000` files API — **no** `sinas` SDK;
+  see the corrected runtime-address note above).
+- ✅ **On-instance hybrid run captured (2026-06-02)** — see "On-instance hybrid
+  capture — DONE" above. Real input delivery + `method: "shot_detection_pyav"` + real
+  per-segment phashes + Claude-vision OCR all verified on via-10. Found & fixed a
+  coordinator wiring bug (`extract_segment_clues` not enabled on the coordinator →
+  empty phashes) in **PR #46**. The module probe shows **`"sinas": false`** (functions
+  use `requests`, not the SDK). Remaining: one clean single-pass coordinator hybrid
+  run after PR #46 is reinstalled.
 - 100 MB `/tmp` + 512 MB RAM + 300 s remain the binding constraints for the video
   pipeline — see docs/risks.md.
