@@ -45,6 +45,16 @@ telegram = [
 ocr = [
     "easyocr>=1.7",
 ]
+# OPTIONAL visual-embedding upgrade path (clip2trace.matching.load_clip_embedder).
+# Heavy (torch is ~1-2 GB) — does NOT fit the pip-only / 512 MB Sinas worker, so
+# this is operator-provisioned / local-only and phash stays the worker default.
+# Deliberately NOT in `dev`: CI installs `dev`, and pulling torch would blow up
+# install time/size. Tests that need the real model use pytest.importorskip.
+# See docs/risks.md ("Visual embedding similarity").
+embeddings = [
+    "open-clip-torch>=2.20",
+    "torch>=2.0",
+]
 dev = [
     "pytest>=8.0",
     "pyyaml>=6.0",

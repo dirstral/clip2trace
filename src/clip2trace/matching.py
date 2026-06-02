@@ -6,9 +6,16 @@ import and test without OpenCV/Telethon present.
 
 from __future__ import annotations
 
-from typing import List, Sequence
+import math
+from typing import Callable, List, Optional, Protocol, Sequence, runtime_checkable
 
 PHASH_BITS = 64  # default size of a 64-bit perceptual hash (imagehash 8x8)
+
+# Default cosine-similarity threshold above which two frame embeddings are
+# considered a visual match. Embedding cosine sims tend to run higher than
+# normalised phash sims for re-encoded/cropped footage, so this sits above the
+# 0.85 phash default; tune per embedder if needed.
+EMBED_MATCH_THRESHOLD = 0.90
 
 
 def hamming_distance(hash_a: str, hash_b: str) -> int:
@@ -155,3 +162,162 @@ def link_candidate_to_segments(
             if sid is not None:
                 out.append(sid)
     return out
+
+
+# ── Optional visual-embedding similarity path ───────────────────────────────
+#
+# Perceptual hashing (above) is the always-available default: it is pure
+# Pillow+imagehash and runs on the pip-only / 512 MB Sinas worker. Embedding
+# similarity (e.g. CLIP) is an OPTIONAL, operator-provisioned / local upgrade
+# path that can beat phash on re-encoded or cropped footage. It requires a heavy
+# model (torch) that does NOT fit the worker, so everything below is import- and
+# embedder-guarded: when no embedder is supplied the callers fall back to phash.
+# See docs/risks.md (row "Visual embedding similarity") for the evaluation.
+
+# An embedder maps an opaque frame reference (e.g. a file path, PIL image, or
+# numpy array) to a fixed-length float embedding. It is INJECTABLE so the cosine
+# / selection logic stays unit-testable with fake vectors and zero heavy deps.
+Embedder = Callable[[object], Sequence[float]]
+
+
+@runtime_checkable
+class SupportsEmbed(Protocol):
+    """Structural type for an object exposing an ``embed(frame) -> vector``."""
+
+    def embed(self, frame: object) -> Sequence[float]: ...
+
+
+def cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
+    """Cosine similarity of two equal-length vectors, clamped to [0, 1].
+
+    Pure Python/math so it is always importable and testable without numpy or
+    any model. Negative cosines (opposite vectors) clamp to 0.0; a zero-norm
+    vector yields 0.0. Raises ``ValueError`` on a length mismatch.
+    """
+    if len(vec_a) != len(vec_b):
+        raise ValueError("embeddings must be the same length")
+    if not vec_a:
+        return 0.0
+    dot = 0.0
+    norm_a = 0.0
+    norm_b = 0.0
+    for a, b in zip(vec_a, vec_b, strict=True):
+        dot += a * b
+        norm_a += a * a
+        norm_b += b * b
+    if norm_a <= 0.0 or norm_b <= 0.0:
+        return 0.0
+    sim = dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
+    # Guard floating-point drift just past the unit bounds.
+    return max(0.0, min(1.0, sim))
+
+
+def best_embedding_similarity(
+    embeddings_a: Sequence[Sequence[float]],
+    embeddings_b: Sequence[Sequence[float]],
+) -> tuple[float, int, int]:
+    """Best pairwise cosine similarity across two sets of frame embeddings.
+
+    Analogous to :func:`best_frame_similarity` but for embedding vectors.
+    Returns (best_similarity, index_a, index_b), or (0.0, -1, -1) if either set
+    is empty. Length-mismatched pairs are skipped rather than raising.
+    """
+    best = 0.0
+    bi, bj = -1, -1
+    for i, ea in enumerate(embeddings_a):
+        for j, eb in enumerate(embeddings_b):
+            try:
+                sim = cosine_similarity(ea, eb)
+            except ValueError:
+                continue
+            if sim > best:
+                best, bi, bj = sim, i, j
+    return best, bi, bj
+
+
+def embed_frames(frames: Sequence[object], embedder: Embedder) -> List[List[float]]:
+    """Embed a sequence of frames with an injected embedder.
+
+    Kept trivial so callers can build embeddings once and reuse them across many
+    comparisons. The embedder is any callable; see :func:`load_clip_embedder`
+    for the optional CLIP-backed one.
+    """
+    return [list(embedder(frame)) for frame in frames]
+
+
+def best_visual_similarity(
+    *,
+    hashes_a: Sequence[str],
+    hashes_b: Sequence[str],
+    embeddings_a: Optional[Sequence[Sequence[float]]] = None,
+    embeddings_b: Optional[Sequence[Sequence[float]]] = None,
+) -> tuple[float, int, int, str]:
+    """Best visual similarity, using embeddings when present, else phash.
+
+    Returns (best_similarity, index_a, index_b, method) where ``method`` is
+    ``"embedding"`` or ``"phash"``. Embeddings are used only when BOTH sides are
+    non-empty; otherwise this falls back to the always-available perceptual-hash
+    path so behaviour is unchanged when no embedder is wired in.
+    """
+    # Explicit None + length checks (not truthiness): numpy arrays raise
+    # "truth value of an array is ambiguous" on `if array`, which would break the
+    # intended fallback when callers pass embeddings as numpy arrays.
+    if (
+        embeddings_a is not None
+        and embeddings_b is not None
+        and len(embeddings_a) > 0
+        and len(embeddings_b) > 0
+    ):
+        sim, i, j = best_embedding_similarity(embeddings_a, embeddings_b)
+        return sim, i, j, "embedding"
+    sim, i, j = best_frame_similarity(hashes_a, hashes_b)
+    return sim, i, j, "phash"
+
+
+def load_clip_embedder(
+    model_name: str = "ViT-B-32",
+    pretrained: str = "openai",
+) -> Embedder:
+    """Build a CLIP-backed :data:`Embedder`, or raise if deps are absent.
+
+    This is the OPTIONAL heavy path. It imports ``open_clip`` + ``torch`` + PIL
+    lazily and raises ``RuntimeError`` (chaining the underlying ``ImportError``)
+    when they are not installed, so import of this module never pulls torch and
+    the pip-only Sinas worker is unaffected. Install with the ``embeddings``
+    extra (``uv pip install -e ".[embeddings]"``) on a machine that can host the
+    model. The returned callable embeds a PIL image or image path into a
+    unit-normalised float vector suitable for :func:`cosine_similarity`.
+    """
+    try:
+        import open_clip  # type: ignore
+        import torch  # type: ignore
+        from PIL import Image  # type: ignore
+    except ImportError as exc:  # pragma: no cover - exercised only with deps
+        raise RuntimeError(
+            "CLIP embeddings require the optional 'embeddings' extra "
+            '(uv pip install -e ".[embeddings]"); this does not run on the '
+            "pip-only Sinas worker — phash remains the default. "
+            f"Underlying import error: {exc}"
+        ) from exc
+
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        model_name, pretrained=pretrained
+    )
+    model.eval()
+
+    def _embed(frame: object) -> Sequence[float]:  # pragma: no cover - needs model
+        # Accept a PIL image or a path; close any file we open promptly so batch
+        # embedding can't exhaust file descriptors. convert() returns a new image,
+        # so the opened source is safe to close immediately.
+        if isinstance(frame, Image.Image):
+            img = frame.convert("RGB")
+        else:
+            with Image.open(frame) as src:  # type: ignore[arg-type]
+                img = src.convert("RGB")
+        with torch.no_grad():
+            tensor = preprocess(img).unsqueeze(0)
+            feats = model.encode_image(tensor)
+            feats = feats / feats.norm(dim=-1, keepdim=True)
+        return feats[0].tolist()
+
+    return _embed

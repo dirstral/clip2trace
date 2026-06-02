@@ -15,6 +15,47 @@
 | 11 | **Inferred package YAML fields** (collections/stores/components) | Med | Marked in sinas-investigation.md; confirm with `sinas validate`; adjust on rejection |
 | 12 | **Function ≠ library** (sandbox can't import `src/`) | Med | Deployable code is inline in YAML; library is reference + tests; documented in architecture.md |
 | 13 | **Demo depends on live Telegram** | Med | Full demo runs on cached fixtures; `hybrid` falls back; never silently fakes live |
+| 14 | **Visual embedding similarity** — CLIP/torch too heavy for the pip-only / 512 MB worker | Med | Embeddings are an optional, operator-provisioned/local-only path behind the `embeddings` extra (not in `dev`); import-guarded; **phash stays the worker default and fallback**. See section below |
+
+## Visual embedding similarity (phash vs CLIP) — evaluation & runtime impact
+
+clip2trace's visual-similarity signal is the heaviest weight in the scoring
+rubric (`visual_similarity` = 0.40). Today it is computed from **perceptual
+hashes** (`phash`, via Pillow + imagehash) compared with Hamming distance. phash
+is robust to mild re-encoding and small overlays but degrades on **heavy
+re-encoding, scaling, cropping, letterboxing, and aspect-ratio changes** — exactly
+the edits common in reused footage. Embedding models (e.g. CLIP image encoders)
+compare frames in a learned semantic space and tend to stay similar under those
+transforms, so they can beat phash on the hard cases.
+
+**Decision: keep phash as the always-available default; add an OPTIONAL,
+import-guarded embedding path** (`clip2trace.matching`: `cosine_similarity`,
+`best_embedding_similarity`, `embed_frames`, `best_visual_similarity`,
+`load_clip_embedder`). `best_visual_similarity` uses embeddings only when both
+sides supply them and otherwise falls back to phash, so default behaviour is
+unchanged.
+
+| Approach | Accuracy on re-encoded / cropped footage | Deps | RAM / CPU | Runs on Sinas worker? |
+|---|---|---|---|---|
+| **phash** (current default) | Good for light re-encode/overlay; **weak under crop/scale/letterbox/aspect change** | Pillow + imagehash (already in baseline) | ~tens of MB, fast on CPU | **Yes** — pip-only, fits 512 MB |
+| **Lightweight embeddings** (e.g. small CLIP `ViT-B-32`, MobileCLIP-style, or ONNX-exported encoder) | Markedly better under crop/scale/re-encode; some semantic false positives | torch **or** onnxruntime + model weights (≈300 MB+) | Model + activations easily exceed 512 MB at load | **No** (torch); maybe a quantised ONNX encoder, still tight |
+| **Full CLIP** (`open-clip-torch` + `torch`) | Best robustness to heavy edits | torch wheel ≈ **1–2 GB**, plus weights | Peaks well over 512 MB; slow on 1 CPU | **No** |
+
+**Why it can't run on the worker.** Sinas workers are **pip-only, 512 MB RAM,
+1 CPU, no system binaries** (see CLAUDE.md "Workers are pip-only"). The `torch`
+wheel alone is ~1–2 GB and the model plus inference activations blow the 512 MB
+ceiling, and there is no GPU. Even a quantised ONNX encoder is risky on 512 MB /
+1 CPU within the 300 s budget. So embeddings are an **optional, operator-
+provisioned / local-only upgrade path**, gated behind the `embeddings`
+extra (`uv pip install -e ".[embeddings]"`, deliberately **not** in `dev` so CI
+never pulls torch). `load_clip_embedder` imports torch/open_clip lazily and
+raises a clear `RuntimeError` when they are absent — importing
+`clip2trace.matching` never pulls torch.
+
+**Fallback guarantee.** phash remains the worker default and the fallback: with
+no embedder injected, the pipeline behaves exactly as before. The cosine math and
+the embedder→phash selection are pure-Python and unit-tested with **injected
+fake vectors** (no heavy deps), with an `importorskip`-guarded real-model test.
 
 ## OCR backends: pytesseract vs EasyOCR vs Claude-vision (#27)
 
