@@ -57,14 +57,23 @@ def extract_hashtags(text: str) -> List[str]:
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{2,}")
 
 
-def derive_context_terms(text: str, limit: int = 8) -> List[str]:
+def derive_context_terms(
+    text: str, limit: int = 8, *, transcript: str = ""
+) -> List[str]:
     """Pull meaningful free-text terms (for `context` queries) from a blob.
 
     Strips @handles and #hashtags first (they have their own query families),
     drops stopwords and tokens shorter than 3 chars, de-duplicates
     case-insensitively, preserves order, and caps the result at `limit`.
+
+    `transcript` is optional spoken-context text (from `asr.extract_transcript`).
+    When given it is appended to the blob so spoken words become context terms;
+    when empty, behaviour is identical to the text-only call.
     """
-    cleaned = HASHTAG_RE.sub(" ", HANDLE_RE.sub(" ", text or ""))
+    blob = text or ""
+    if transcript:
+        blob = f"{blob} {transcript}"
+    cleaned = HASHTAG_RE.sub(" ", HANDLE_RE.sub(" ", blob))
     seen, out = set(), []
     for w in _WORD_RE.findall(cleaned):
         key = w.lower()
@@ -77,7 +86,7 @@ def derive_context_terms(text: str, limit: int = 8) -> List[str]:
     return out
 
 
-def generate_queries(clues: Dict) -> List[Dict]:
+def generate_queries(clues: Dict, *, transcript: str = "") -> List[Dict]:
     """Turn segment clues into a small, ranked Telegram query set.
 
     Query families, in priority order:
@@ -87,7 +96,11 @@ def generate_queries(clues: Dict) -> List[Dict]:
       4 hashtag     — hashtags
 
     `clues` keys (all optional): visible_handles, ocr_text, context_terms,
-    caption. Returns dicts matching schemas.TelegramQuery.
+    caption. `transcript` is optional spoken-context text (e.g. from
+    `asr.extract_transcript`); when supplied, its terms/handles/hashtags fold
+    into the existing families so spoken context broadens retrieval. When empty,
+    behaviour is identical to the clues-only call. Returns dicts matching
+    schemas.TelegramQuery.
     """
     queries: List[Dict] = []
     seen = set()
@@ -106,8 +119,13 @@ def generate_queries(clues: Dict) -> List[Dict]:
             clues.get("ocr_text", "") or "",
             clues.get("caption", "") or "",
             " ".join(clues.get("context_terms", []) or []),
+            transcript or "",
         ]
     )
+
+    # Spoken context becomes additional context terms (handles/hashtags in the
+    # transcript are already covered via `text_blob` below).
+    transcript_terms = derive_context_terms("", transcript=transcript)
 
     # 1. Exact handles (from clue field + discovered in text).
     handles = list(clues.get("visible_handles", []) or [])
@@ -130,8 +148,8 @@ def generate_queries(clues: Dict) -> List[Dict]:
             "Exact on-screen text should match a verbatim caption/overlay.",
         )
 
-    # 3. Context terms (filtered).
-    for term in clues.get("context_terms") or []:
+    # 3. Context terms (filtered) — clue terms first, then spoken-context terms.
+    for term in list(clues.get("context_terms") or []) + transcript_terms:
         t = (term or "").strip()
         if len(t) >= 3 and t.lower() not in _STOPWORDS:
             add(t, "context", 3, "Contextual term to broaden retrieval.")

@@ -16,6 +16,7 @@
 | 12 | **Function ≠ library** (sandbox can't import `src/`) | Med | Deployable code is inline in YAML; library is reference + tests; documented in architecture.md |
 | 13 | **Demo depends on live Telegram** | Med | Full demo runs on cached fixtures; `hybrid` falls back; never silently fakes live |
 | 14 | **Visual embedding similarity** — CLIP/torch too heavy for the pip-only / 512 MB worker | Med | Embeddings are an optional, operator-provisioned/local-only path behind the `embeddings` extra (not in `dev`); import-guarded; **phash stays the worker default and fallback**. See section below |
+| 15 | **ASR is a heavy, optional dep** (whisper/faster-whisper) — won't run on the pip-only 512 MB / 300 s worker | Med | Opt-in via the `asr` extra (`src/clip2trace/asr.py`): import-guarded + backend-injectable; absent the dep, `extract_transcript()` returns `""` and the query plan is unchanged. See "ASR / transcript extraction" below |
 
 ## Visual embedding similarity (phash vs CLIP) — evaluation & runtime impact
 
@@ -97,6 +98,43 @@ out of the `dev` extra** (CI installs `dev`); it lives in its own
 or the deployable function image. Because EasyOCR cannot run on the worker, the
 **deployable inline function code is unchanged** — this is a library-level
 upgrade path plus documentation.
+
+## ASR / transcript extraction (optional, operator-provisioned/local)
+
+Spoken context improves query planning: a transcript yields extra **context**
+terms (and any spoken @handles / #hashtags) that fold into the same query
+families `telegram_search.generate_queries` already builds. ASR is **not part of
+the default pipeline** — it is an opt-in upgrade path.
+
+**Why it can't run on the managed Sinas worker.** ASR models are heavy:
+
+| Backend / model | On-disk model | Extra deps | Approx. peak RAM | Speed (CPU) |
+|---|---|---|---|---|
+| faster-whisper `tiny` (int8) | ~75 MB | ctranslate2 + onnxruntime (no torch) | ~0.5–1 GB | ~1–3× realtime |
+| faster-whisper `base` | ~145 MB | ctranslate2 + onnxruntime (no torch) | ~1 GB+ | slower than realtime |
+| openai-whisper `base` | ~140 MB | **torch** (~2 GB wheel) + ffmpeg binary | ~2 GB+ | well below realtime on CPU |
+
+The Sinas worker is **pip-only, 512 MB RAM, 1 CPU, 100 MB `/tmp`, 300 s
+timeout** with no system binaries. Even the smallest model exceeds the RAM
+budget once the model + native runtime are loaded — for faster-whisper that's
+CTranslate2/onnxruntime plus the model weights (no torch); openai-whisper is
+heavier still and *additionally* needs torch and an `ffmpeg` binary the image
+can't provide. CPU-only transcription of a clip also blows the 300 s timeout. So
+ASR is intentionally **excluded from the worker** and provisioned only locally /
+by an operator on a beefier host.
+
+**Graceful degradation (no behaviour change without a transcript).**
+`src/clip2trace/asr.py` import-guards the backend and keeps it injectable:
+
+- the `asr` extra (`faster-whisper`) is **separate from `dev`** so CI stays
+  light and green;
+- with no backend installed, `extract_transcript()` returns `""` (and a failing
+  backend also degrades to `""` — it never raises);
+- `generate_queries(clues, transcript="")` is byte-for-byte identical to the
+  clues-only call, so the default pipeline is unaffected.
+
+Tests cover the no-dep fallback and the transcript→query-term path using a fake
+injected transcriber, so no heavy model is needed in CI.
 
 ## Safety / compliance notes
 - Product wording is **provenance and source tracing only**. No tactical

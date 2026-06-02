@@ -55,6 +55,15 @@ embeddings = [
     "open-clip-torch>=2.20",
     "torch>=2.0",
 ]
+# Optional ASR / transcript extraction (spoken context for query planning).
+# HEAVY + operator-provisioned/local only — faster-whisper pulls in the
+# CTranslate2 native runtime (+ onnxruntime) and a multi-hundred-MB model (no
+# torch; that's the openai-whisper path), and will NOT run on the pip-only 512 MB
+# / 300 s Sinas worker (see docs/risks.md, row 14). Never add this to `dev`: CI
+# installs `dev` and must stay light. Absent this extra, extract_transcript()="".
+asr = [
+    "faster-whisper>=1.0",
+]
 dev = [
     "pytest>=8.0",
     "pyyaml>=6.0",
