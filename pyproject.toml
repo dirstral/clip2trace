@@ -41,6 +41,9 @@ telegram = [
 dev = [
     "pytest>=8.0",
     "pyyaml>=6.0",
+    "ruff>=0.6",
+    "black>=24.0",
+    "mypy>=1.11",
 ]
 
 [tool.setuptools.packages.find]
@@ -49,3 +52,37 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+# ── Formatting / linting / typing ──────────────────────────────────────────────
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+# Lint everything except vendored skill dirs.
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+# pycodestyle errors+warnings, pyflakes, isort, bugbear, comprehensions, and
+# single-line implicit string concat. (pyupgrade `UP` deferred — it rewrites all
+# the typing hints; adopt separately.)
+select = ["E", "F", "W", "I", "B", "C4", "ISC001"]
+# E501 (line length) is owned by black.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests favour terse fixtures and re-import helpers; relax a couple of rules.
+"tests/*" = ["B011"]
+
+[tool.mypy]
+# Type-check the reusable library only. functions/ are dynamic Sinas handlers and
+# the sandbox can't import the package anyway; tests are dynamic by design.
+files = ["src/clip2trace"]
+python_version = "3.10"
+ignore_missing_imports = true       # optional deps (telethon, cv2, av, imagehash…)
+no_implicit_optional = true
+# `# type: ignore` on optional-dep imports is intentional, so don't flag it unused
+# (ignore_missing_imports already silences those import errors).
+warn_unused_ignores = false
