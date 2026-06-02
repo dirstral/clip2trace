@@ -9,8 +9,11 @@ import base64
 
 import requests
 
-from clip2trace.storage import (stage_input_file, resolve_runtime_base_url,
-                                 SINAS_RUNTIME_BASE_URL)
+from clip2trace.storage import (
+    SINAS_RUNTIME_BASE_URL,
+    resolve_runtime_base_url,
+    stage_input_file,
+)
 
 
 class _FakeResp:

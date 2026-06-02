@@ -16,19 +16,19 @@ Usage:
 
 from __future__ import annotations
 
-import sys
-
-# Mirror the Sinas worker (cv2/scenedetect unavailable there) -> PyAV path.
-sys.modules["cv2"] = None
-sys.modules["scenedetect"] = None
-
 import argparse
 import glob
 import os
-from fractions import Fraction
+import sys
 
 import av
 import numpy as np
+
+# Mirror the Sinas worker (cv2/scenedetect unavailable there) -> PyAV path. Safe
+# after the imports above — none of them load cv2; the inline detector exec'd at
+# runtime is what must see cv2 absent.
+sys.modules["cv2"] = None
+sys.modules["scenedetect"] = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(ROOT, "sinas-package.yaml")

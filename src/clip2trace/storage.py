@@ -112,8 +112,8 @@ def stage_input_file(file_id: str, context: Optional[Dict[str, Any]] = None, *,
     file_id / no token / not authorized / download fails / the file exceeds
     `max_bytes` (callers then fall back to uniform/demo segmentation).
     """
-    import os
     import base64
+    import os
     import tempfile
     from urllib.parse import quote
     context = context or {}

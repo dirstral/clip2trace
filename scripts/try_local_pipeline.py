@@ -20,23 +20,24 @@ Usage:
 
 from __future__ import annotations
 
-import sys
-
-# Mirror the Sinas worker: cv2/scenedetect are NOT importable there, so force the
-# PyAV+numpy+imagehash path. (Also dodges the local av/cv2 dylib clash.)
-sys.modules["cv2"] = None
-sys.modules["scenedetect"] = None
-
 import argparse
 import base64
 import http.server
 import json
 import os
 import socketserver
+import sys
 import tempfile
 import threading
 
 import numpy as np
+
+# Mirror the Sinas worker: cv2/scenedetect are NOT importable there, so force the
+# PyAV+numpy+imagehash path (also dodges the local av/cv2 dylib clash). Safe after
+# the imports above — none of them load cv2; the inline detector exec'd at runtime
+# is what must see cv2 absent.
+sys.modules["cv2"] = None
+sys.modules["scenedetect"] = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(ROOT, "sinas-package.yaml")
