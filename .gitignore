@@ -59,3 +59,6 @@ npm-debug.log*
 .idea/
 .vscode/
 *.swp
+
+# local pipeline harness scratch (scripts/try_local_pipeline.py)
+.localinstance/
