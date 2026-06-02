@@ -296,12 +296,18 @@ class TelethonSearchClient:
                         )
                         break
                     except Exception as exc:
-                        cand["accessible"] = False
                         name = type(exc).__name__
-                        reason = (
-                            "inaccessible" if name in INACCESSIBLE_ERROR_NAMES else name
-                        )
-                        diags.append(f"{channel}/{mid}: download failed ({reason})")
+                        if name in INACCESSIBLE_ERROR_NAMES:
+                            # Genuinely inaccessible (private/deleted/invalid).
+                            cand["accessible"] = False
+                            diags.append(f"{channel}/{mid}: inaccessible ({name})")
+                        else:
+                            # Transient/network/disk error — leave `accessible`
+                            # alone so a later run can retry; just record it.
+                            diags.append(
+                                f"{channel}/{mid}: download error ({name}); "
+                                "may be transient"
+                            )
         except Exception as exc:  # connector / connection setup failure
             diags.append(f"download session failed: {exc!r}")
         self.diagnostics.extend(diags)

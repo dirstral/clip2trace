@@ -96,7 +96,10 @@ class _DLClient:
 
 @pytest.fixture
 def flood_error():
-    """Stub telethon.errors so download_candidates can import FloodWaitError."""
+    """Stub `telethon` + `telethon.errors` so download_candidates can import
+    FloodWaitError even when Telethon isn't installed. Injecting the parent
+    package too keeps it robust regardless of import-machinery details."""
+    telethon = pytypes.ModuleType("telethon")
     errors = pytypes.ModuleType("telethon.errors")
 
     class FloodWaitError(Exception):
@@ -104,15 +107,18 @@ def flood_error():
             self.seconds = seconds
 
     errors.FloodWaitError = FloodWaitError
-    saved = sys.modules.get("telethon.errors")
+    telethon.errors = errors
+    saved = {k: sys.modules.get(k) for k in ("telethon", "telethon.errors")}
+    sys.modules["telethon"] = telethon
     sys.modules["telethon.errors"] = errors
     try:
         yield FloodWaitError
     finally:
-        if saved is None:
-            sys.modules.pop("telethon.errors", None)
-        else:
-            sys.modules["telethon.errors"] = saved
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
 
 
 def _cands(*ids):
@@ -164,6 +170,16 @@ def test_download_private_marks_inaccessible(flood_error):
     res = sc.download_candidates(_cands(10))
     assert res["candidates"][0]["accessible"] is False
     assert any("inaccessible" in d for d in res["diagnostics"])
+
+
+def test_download_transient_error_keeps_accessible(flood_error):
+    # A non-inaccessible (transient/network/disk) error must NOT poison
+    # `accessible` — the post may still be reachable on a later retry.
+    sc = _client_with({10: ConnectionError("network blip")})
+    res = sc.download_candidates(_cands(10))
+    assert res["downloaded"] == 0
+    assert res["candidates"][0]["accessible"] is True
+    assert any("may be transient" in d for d in res["diagnostics"])
 
 
 def test_download_empty_media(flood_error):
