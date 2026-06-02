@@ -49,10 +49,13 @@ htmlcov/
 node_modules/
 npm-debug.log*
 
-# --- Official Sinas skills (AGPL-3.0; license-compatible with this AGPL repo) ---
-# Kept out of git so they stay fresh from upstream; installed/refreshed by
-# scripts/setup_sinas_skills.sh for Claude Code to auto-discover.
-.claude/skills/
+# --- Local coding-agent config / tooling (not part of the package) ---
+# Claude Code + agent settings and the official Sinas skills (AGPL-3.0;
+# license-compatible with this AGPL repo). Kept out of git so the skills stay
+# fresh from upstream; installed/refreshed by scripts/setup_sinas_skills.sh for
+# Claude Code to auto-discover.
+.claude/
+.agents/
 
 # --- OS / editor ---
 .DS_Store
