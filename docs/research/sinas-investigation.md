@@ -151,5 +151,10 @@ If `sinas validate` rejects any of these, adjust in `sinas-package.yaml`.
   — the function list returns `[]` and single read/execute are denied for the key
   principal. Execute functions/agents from the **console UI** (full user session)
   or investigate per-resource visibility. Deploy itself is unaffected.
+  **Superseded (2026-06-02):** the token-specific overrides are the root cause
+  on via-10, not a per-resource visibility gate. The corrected diagnosis,
+  evidence, and operator-side remediation are in
+  `docs/research/permissions-diagnosis.md`; the reproducer is
+  `scripts/diagnose_permissions.py`.
 - `sinas status` → 404 on `/api/v1/manifests/clip2trace/clip2trace/status` (the
   manifest exists; the status endpoint path/availability differs on this build).
