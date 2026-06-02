@@ -594,8 +594,14 @@ spec:
           cached_results: { type: array, items: { type: object } }
           manual_urls: { type: array, items: { type: string } }
       code: |
+        # Self-contained: the sandbox can't import clip2trace. Mirrors
+        # src/clip2trace/telegram_live.py. channels.searchPosts is user-only;
+        # hashtag is unmetered, free-text is metered (we never spend Stars).
         def handler(input_data, context):
+            input_data = input_data or {}
+            context = context or {}
             mode = input_data.get("mode", "demo")
+            queries = input_data.get("queries") or []
             manual = input_data.get("manual_urls") or []
             if manual:
                 return {"status": "ok", "source": "manual_urls",
@@ -604,14 +610,88 @@ spec:
             cached = input_data.get("cached_results")
             if cached is not None:
                 return {"status": "ok", "source": "cached", "candidates": cached}
-            secrets = (context or {}).get("secrets") or {}
-            have_creds = all(secrets.get(k) for k in
-                             ("TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_SESSION_STRING"))
-            if mode in ("live", "hybrid") and not have_creds:
-                return {"status": "live_unavailable", "candidates": [],
-                        "diagnostics": ["missing Telegram secrets or not shared-pool"]}
-            return {"status": "demo_no_data", "candidates": [],
-                    "diagnostics": ["live search not implemented in stub"]}
+            if mode in ("live", "hybrid"):
+                secrets = context.get("secrets") or {}
+                api_id = secrets.get("TELEGRAM_API_ID")
+                api_hash = secrets.get("TELEGRAM_API_HASH")
+                session = secrets.get("TELEGRAM_SESSION_STRING")
+                if not (api_id and api_hash and session):
+                    return {"status": "live_unavailable", "source": "none",
+                            "candidates": [], "diagnostics":
+                            ["missing Telegram secrets/session or not sharedPool"]}
+                try:
+                    from telethon.sync import TelegramClient
+                    from telethon.sessions import StringSession
+                    from telethon import functions, types
+                    from telethon.errors import FloodWaitError
+                except Exception as exc:
+                    return {"status": "live_unavailable", "source": "none",
+                            "candidates": [], "diagnostics":
+                            ["telethon unavailable: %r" % (exc,)]}
+                results, seen, diags = [], set(), []
+                try:
+                    with TelegramClient(StringSession(session), int(api_id), api_hash) as client:
+                        for q in queries:
+                            text = (q.get("query") or "").strip()
+                            if not text:
+                                continue
+                            if q.get("query_type") == "hashtag" or text.startswith("#"):
+                                hashtag, query = text.lstrip("#"), None
+                            else:
+                                hashtag, query = None, text
+                            offset_rate, offset_id, pages = 0, 0, 0
+                            try:
+                                while pages < 5 and len(results) < 50:
+                                    res = client(functions.channels.SearchPostsRequest(
+                                        hashtag=hashtag, query=query, offset_rate=offset_rate,
+                                        offset_peer=types.InputPeerEmpty(),
+                                        offset_id=offset_id, limit=100))
+                                    msgs = list(getattr(res, "messages", []) or [])
+                                    if not msgs:
+                                        break
+                                    chats = {getattr(c, "id", None): c
+                                             for c in (getattr(res, "chats", []) or [])}
+                                    for m in msgs:
+                                        peer = getattr(m, "peer_id", None)
+                                        ch = chats.get(getattr(peer, "channel_id", None))
+                                        user = getattr(ch, "username", None) if ch else None
+                                        mid = getattr(m, "id", None)
+                                        key = "%s_%s" % (user or "unknown", mid)
+                                        if key in seen:
+                                            continue
+                                        seen.add(key)
+                                        date = getattr(m, "date", None)
+                                        results.append({
+                                            "candidate_id": key, "channel": user,
+                                            "message_id": mid,
+                                            "url": ("https://t.me/%s/%s" % (user, mid))
+                                                   if user and mid else None,
+                                            "posted_at": date.isoformat()
+                                                         if hasattr(date, "isoformat") else None,
+                                            "caption": getattr(m, "message", "") or "",
+                                            "has_media": getattr(m, "media", None) is not None,
+                                            "is_forward": getattr(m, "fwd_from", None) is not None,
+                                            "accessible": True, "source_query": q.get("query")})
+                                    nr = getattr(res, "next_rate", None)
+                                    if not nr:
+                                        break
+                                    offset_rate = nr
+                                    offset_id = getattr(msgs[-1], "id", 0) or 0
+                                    pages += 1
+                            except FloodWaitError as exc:
+                                diags.append("flood wait %ss; stopping" %
+                                             getattr(exc, "seconds", "?"))
+                                break
+                            except Exception as exc:
+                                diags.append("query failed %r: %r" % (q.get("query"), exc))
+                    return {"status": "ok", "source": "live",
+                            "candidates": results, "diagnostics": diags}
+                except Exception as exc:
+                    return {"status": "live_unavailable", "source": "none",
+                            "candidates": [], "diagnostics":
+                            ["live search error: %r" % (exc,)]}
+            return {"status": "demo_no_data", "source": "none", "candidates": [],
+                    "diagnostics": ["demo mode and no cached_results/manual_urls supplied"]}
 
     - namespace: clip2trace
       name: fetch_telegram_candidate_media

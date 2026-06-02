@@ -21,9 +21,9 @@ This is the implementation plan. The feasibility findings live in
   logic (unit-tested without Telethon) plus a thin, lazily-imported Telethon
   glue. `build_client_from_secrets` returns `None` when Telethon or any secret is
   missing, so the function reports `live_unavailable` instead of faking a search.
-  **Follow-up:** mirror this into the `sinas-package.yaml` inline `code:` block
-  (self-contained) once the in-flight package PR lands, to keep the deployed
-  function in sync.
+  The deployable `sinas-package.yaml` inline `code:` block carries a
+  self-contained mirror of this logic (the sandbox can't import clip2trace), kept
+  runnable in demo mode and guarded by `tests/test_package_inline_sync.py`.
 - Exactly one of `hashtag` / `query` per call. Prefer **handle/hashtag** queries
   (unmetered) over free-text (metered → Stars).
 - Paginate with `offset_rate`/`offset_peer`/`offset_id`; read `next_rate`.
