@@ -105,21 +105,39 @@ worker. The full visual pipeline is live with **zero infra changes**.
 - Routing note: the adapter maps `model:"namespace/name"` to an **agent** instead
   of a direct-LLM call.
 
-**Function runtime address — there is none (persistence is agent-layer).** The
-probe also dumped `env_keys` + `context_keys`: a function gets
-`context["access_token"]` but **no base URL** anywhere (`env_keys` = HOME, PATH,
-WORKER_ID, WORKER_MODE, SINAS_CONTAINER_MODE, … ; `context_keys` = access_token,
-execution_id, secrets, user_id, …). There's no preinstalled `sinas` SDK either.
-So a function **cannot call back** to `POST /states` / `POST /files/...` — it can't
-construct the URL. This matches the package design: **functions declare no store
-access; agents do** (`coordinator`/`report-writer` carry `enabledStores` /
-`enabledCollections` readwrite). **Decision: persistence is agent-layer** — functions
-are pure transforms that return data, and the orchestrating agents persist it
-(job lifecycle → `clip2trace/jobs`, segments → `clip2trace/segments`, report →
-`clip2trace/reports`). (Keyframe *image* files aren't stored — functions return
-perceptual hashes, which is what visual verification needs; raw-frame upload would
-require the missing function runtime address.) See the agent prompts in
-`sinas-package.yaml` + `agents/*.md`.
+**Function runtime address — CORRECTED (functions CAN reach the runtime).** An
+earlier reading of this probe concluded a function had "no runtime address": it
+dumped `env_keys` + `context_keys` and found `context["access_token"]` but **no base
+URL** (`env_keys` = HOME, PATH, WORKER_ID, WORKER_MODE, SINAS_CONTAINER_MODE, … ;
+`context_keys` = access_token, execution_id, secrets, user_id, …). That conclusion
+was **incomplete**: the base URL is **not delivered via env/context** — it is a
+**hardcoded SDK default**, which is exactly why the key-dump never showed it. The
+authoritative `sinas-package-author` skill (`.claude/skills/sinas-package-author/SKILL.md:327-337`)
+documents that the **`sinas==0.1.7` SDK is preinstalled** in the worker and a function
+calls back with:
+
+```python
+from sinas import SinasClient
+client = SinasClient(base_url="http://host.docker.internal:8000",
+                     token=context["access_token"])
+```
+
+This is corroborated on-instance: Claude-vision OCR already works from inside
+`extract_segment_clues` by POSTing to `{base}/adapters/openai/v1/chat/completions`
+(see the OCR section above). So a function **can** `GET /files/...` (input delivery,
+#36) and could `POST /states` if needed. (`diagnose_runtime` now also probes
+`"sinas"` so SDK availability is confirmed directly on via-10.)
+
+**Persistence stays agent-layer — by design choice, not impossibility.** The package
+keeps **functions as pure transforms** that return data, while the orchestrating
+agents (`coordinator`/`report-writer`, which carry `enabledStores` /
+`enabledCollections` readwrite) persist it (job lifecycle → `clip2trace/jobs`,
+segments → `clip2trace/segments`, report → `clip2trace/reports`). This keeps
+functions stateless/testable; we did **not** re-architect it after the correction.
+The one place the function *does* call the runtime is **input delivery** (#36):
+fetching the uploaded `input-videos` file to `/tmp` so PyAV can decode it. (Keyframe
+*image* files still aren't stored — functions return perceptual hashes, which is what
+visual verification needs.) See the agent prompts in `sinas-package.yaml` + `agents/*.md`.
 
 **Follow-up (#33, OPTIONAL acceleration — operator-only):** if the Sinas/WeAreBrain
 operator ever adds `libGL`+opencv/scenedetect and `ffmpeg`/`tesseract` to the
@@ -129,6 +147,66 @@ supported, working route.
 
 Documented container ceilings (design against these): **512 MB RAM, 1 GB disk,
 100 MB `/tmp` (confirmed), 300 s timeout.**
+
+## Input delivery (#36) — files API on via-10 (probed 2026-06-02)
+
+How a function gets an uploaded `input-videos` file, confirmed against
+`GET {SINAS_BASE_URL}/openapi.json` on via-10:
+
+- The files API is **name-addressed**, not id-addressed:
+  `GET /files/{namespace}/{collection}/{filename}`. So `input_video_file_id` is the
+  uploaded file's **name** within `clip2trace/input-videos`.
+- **Download returns a JSON envelope, not raw bytes** (schema `FileDownloadResponse`):
+  `{ content_base64, content_type, file_metadata, version }`. The staging helper
+  (`stage_input_file` in `src/clip2trace/storage.py`; inline `_stage_input_video` in
+  the three video functions) base64-decodes `content_base64` to `/tmp`, bounded to
+  ~90 MB (100 MB `/tmp` cap). (An earlier draft streamed raw bytes — wrong; corrected
+  after this probe.)
+- Upload (console/dashboard) is `POST /files/{ns}/{collection}` with
+  `{ name, content_base64, content_type, visibility, file_metadata }`.
+- A larger-file alternative exists for later (#20 scale-up): `POST
+  /files/{ns}/{collection}/{filename}/url` mints a temp URL (served via
+  `/files/serve/{token}`) for streaming, avoiding loading base64 into RAM.
+
+**Auth / RBAC caveat (must run from the console).** With the admin token, both
+`GET /files/clip2trace/input-videos` (list) and
+`POST /functions/clip2trace/diagnose_runtime/execute` return **403 Not authorized** —
+the same resource-level 403 noted in `sinas-investigation.md`. So functions/agents
+and file ops must be exercised from the **console UI (full user session)**, not the
+admin/scoped API token. The function's own per-execution `access_token` inherits the
+invoking user's scope; if it 403s on the files download, grant a
+`clip2trace.input-videos.read` permission in `sinas-config.yaml` to the user's role.
+
+**Deploy status (2026-06-02).** The #36 + #25 + #3 package update **validated**
+(`POST /api/v1/packages/preview` → `success: true`; 1 function created
+`cluster_segments`, 6 updated, 2 agents updated — no invented fields) and was
+**installed** (`POST /api/v1/packages/install` → 200). Workers must be **reloaded in
+the console** (no reload API endpoint) before the new code loads.
+
+### Pending on-instance capture (console UI, full user session)
+1. Click **Reload Workers**; execute `diagnose_runtime` → confirm `"sinas": true`.
+2. Upload a small (<90 MB) real video to `clip2trace/input-videos`; note its `name`.
+3. Run the **coordinator** agent in **hybrid** mode with `input_video_file_id=<name>`
+   (Telegram stays cached/demo — live disabled, no session). Paste the result here:
+   expect `method: "shot_detection_pyav"` and **real** perceptual hashes (not the demo
+   `c3e1…`/`5a5a…`), plus repeated-footage clusters in the report.
+
+## Shot detection — color-histogram metric (2026-06-02)
+
+The PyAV+numpy shot detector (`_detect_shots_av` + the inline copies in
+`analyze_input_video`/`detect_source_segments`) scores each frame transition by the
+**mean per-channel color-histogram total-variation distance**, not a grayscale
+pixel-mean difference. Reason, found by exporting segment clips from real
+`samples/*.mkv` compilations: a grayscale mean-diff (fixed 0.30 threshold)
+**under-segmented** overlay-heavy / similar-luma news clips — two samples collapsed
+to a single segment because their peak grayscale diff was only 0.25 / 0.29. A
+persistent on-screen overlay (logo/border/caption) is constant frame-to-frame and
+*dilutes* a global pixel mean, whereas it cancels in the histogram difference; color
+also separates scenes that share brightness. After the change (threshold 0.25,
+local-max + 1.5 s min-gap), the five samples segment 4 / 6 / 14 / 17 / 19 (was
+4 / **1** / **1** / 8 / 6) — verified by eye that the new cuts land on real scene
+changes. Still numpy-only (no opencv on the worker). Inspect with
+`scripts/export_segments.py --all`.
 
 ## Graceful-degradation matrix (what clip2trace does when a capability is missing)
 
@@ -150,10 +228,18 @@ demoable offline (see the test suite + `docs/demo-plan.md`).
 The `diagnose_runtime` function reports exactly which of these are importable on
 the instance, so the above fallbacks can be predicted before a run.
 
-## Blockers / follow-ups
-- Run `diagnose_runtime` on the instance and paste real output here.
-- If ffmpeg/OpenCV/tesseract/Telethon are missing or unapproved, file the
-  dependency-approval requests (issue "Investigate Sinas function runtime
-  capabilities").
-- 100 MB `/tmp` + 512 MB RAM + 300 s are the binding constraints for the video
+## Status / follow-ups
+
+- ✅ `diagnose_runtime` **has been run on via-10** and the real post-reload output is
+  captured above (2026-06-02) — this section no longer has a pending "paste output"
+  TODO. #3's acceptance (ffmpeg/tesseract/OpenCV/Telethon/disk/timeout/secrets
+  documented) is met by the capability table above.
+- Dependency-approval follow-ups were filed: **#33** (operator-only system libs —
+  `libGL`/opencv/scenedetect, `ffmpeg`/`tesseract`; optional acceleration, not
+  required) and **#36** (uploaded-video → worker input delivery, now wired via the
+  `sinas` SDK / `host.docker.internal:8000` files API — see the corrected runtime-address
+  note above).
+- Re-run after the #36 change to confirm `"sinas": true` in the module probe and to
+  capture the on-instance hybrid run (real video → segments → real phashes → report).
+- 100 MB `/tmp` + 512 MB RAM + 300 s remain the binding constraints for the video
   pipeline — see docs/risks.md.

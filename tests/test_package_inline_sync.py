@@ -23,6 +23,9 @@ MINIMAL_INPUT = {
         "segment_id": "seg_001",
         "text_hint": "follow @demo_channel",
     },
+    "cluster_segments": {
+        "segments": [{"segment_id": "seg_001", "phashes": ["c3e1c3e1c3e1c3e1"]}]
+    },
     "generate_telegram_queries": {"visible_handles": ["demo_channel"]},
     "search_global_telegram_posts": {"mode": "demo"},
     "fetch_telegram_candidate_media": {"candidates": []},

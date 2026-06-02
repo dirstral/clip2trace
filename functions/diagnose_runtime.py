@@ -39,6 +39,7 @@ def handler(input_data, context):
         "rapidfuzz",
         "dateutil",
         "requests",
+        "sinas",
     ]
     return {
         "python": sys.version.split()[0],

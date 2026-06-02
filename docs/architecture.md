@@ -62,6 +62,15 @@ Video decode + shot detection + per-candidate media verification can exceed the
 100 MB `/tmp`) force chunked, streaming frame processing — never load a whole
 video into memory.
 
+For a **real upload (#36)**, the same long steps first **download** the
+`input-videos` file to `/tmp` (via the `sinas` SDK / `host.docker.internal:8000`,
+bounded to ~90 MB) before decoding — added latency on top of decode. This is why
+those steps must run async (#20) and why their `timeout` must stay ≥ the realistic
+download+decode time: the per-execution access token used for the download has a
+TTL of `timeout + 5 min`, so too short a `timeout` can expire the token mid-job.
+Wiring `/execute/async` + `/executions/{id}` polling in the dashboard is tracked
+in **#20** (the unmet "long videos via async" acceptance criterion from #9).
+
 ## Why retrieval ≠ proof (and visual verification is the differentiator)
 Global Telegram search only *retrieves candidates*. A caption/handle match is
 weak alone; a post may be a repost; private/deleted posts are invisible.

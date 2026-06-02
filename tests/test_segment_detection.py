@@ -148,6 +148,36 @@ def test_pyav_shot_detector_finds_cut(tmp_path):
     assert len(wins) >= 2, f"expected a detected cut, got {wins}"
 
 
+def _write_two_color_av(path, av, np, c1, c2, per=20, size=(64, 48), fps=10):
+    w, h = size
+    with av.open(path, mode="w") as c:
+        st = c.add_stream("mpeg4", rate=fps)
+        st.width, st.height, st.pix_fmt = w, h, "yuv420p"
+        for color in (c1, c2):
+            block = np.zeros((h, w, 3), dtype=np.uint8)
+            block[:, :] = color
+            for _ in range(per):
+                fr = av.VideoFrame.from_ndarray(block, format="rgb24")
+                for p in st.encode(fr):
+                    c.mux(p)
+        for p in st.encode():
+            c.mux(p)
+
+
+def test_pyav_shot_detector_finds_color_cut(tmp_path):
+    """A red->blue cut: grayscale luma differs by only ~0.18 (under the old 0.30
+    mean-diff threshold, so the previous detector MISSED it), but the color
+    histograms are disjoint -> the histogram metric detects the cut."""
+    av = pytest.importorskip("av")
+    np = pytest.importorskip("numpy")
+    from clip2trace.video import _detect_shots_av
+
+    path = str(tmp_path / "color.mp4")
+    _write_two_color_av(path, av, np, (220, 0, 0), (0, 0, 220))
+    wins = _detect_shots_av(path)
+    assert len(wins) >= 2, f"expected a color cut to be detected, got {wins}"
+
+
 def test_phash_is_cv2_free():
     np = pytest.importorskip("numpy")
     import sys

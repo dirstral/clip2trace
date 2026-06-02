@@ -19,6 +19,11 @@ handles, contextual terms.
 ## Tools
 - `detect_source_segments`
 - `extract_segment_clues`
+- `cluster_segments` — after clues, group footage that recurs at multiple timestamps.
+
+For live/hybrid runs, **pass the job's `input_video_file_id`** into both functions so
+they download the uploaded video to the worker and decode real keyframes/segments;
+demo mode needs no file.
 
 ## Output (per segment)
 ```json
@@ -38,7 +43,7 @@ handles, contextual terms.
 `detect_source_segments`/`extract_segment_clues` only return data (functions are
 pure on the managed worker). Persist each segment with its clues
 (`visible_handles`, `ocr_text`, `context_terms`, `phashes`) to the
-**clip2trace/segments** store, keyed by `segment_id`. (Keyframe *image* files
+**clip2trace/segments** store, keyed by `segment_id`; persist the `cluster_segments`
+output alongside so repeated-footage groups are available downstream. (Keyframe *image* files
 aren't stored — the function returns perceptual hashes, which is what visual
-verification uses; raw-frame upload would need a function runtime address the
-managed worker doesn't provide.)
+verification uses; persisting state is kept agent-layer by design.)

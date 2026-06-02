@@ -10,6 +10,7 @@ def handler(input_data, context):
         return {"error": "job_id is required"}
 
     segments = input_data.get("segments") or []
+    clusters = input_data.get("clusters") or []
     ranked = input_data.get("ranked_candidates") or []
     mode = input_data.get("mode", "demo")
     output_format = input_data.get("output_format", "json")
@@ -17,7 +18,7 @@ def handler(input_data, context):
     try:
         from clip2trace.report import build_report
 
-        report = build_report(job_id, segments, ranked, mode=mode)
+        report = build_report(job_id, segments, ranked, mode=mode, clusters=clusters)
     except Exception:
         kept = [c for c in ranked if not c.get("rejected")]
         report = {
@@ -28,6 +29,9 @@ def handler(input_data, context):
             ),
             "generated_mode": mode,
             "segments": segments,
+            "repeated_footage": [
+                c for c in clusters if len(c.get("segment_ids") or []) > 1
+            ],
             "ranked_candidates": kept,
             "caveats": [
                 "Global Telegram search is retrieval, not proof of origin.",

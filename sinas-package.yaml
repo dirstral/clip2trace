@@ -170,7 +170,7 @@ spec:
                 "modules": {m: has_mod(m) for m in
                             ["av", "cv2", "scenedetect", "imagehash", "PIL",
                              "numpy", "telethon", "rapidfuzz", "dateutil",
-                             "requests"]},
+                             "requests", "sinas"]},
                 "tools": {"ffmpeg": bool(shutil.which("ffmpeg")),
                           "tesseract": bool(shutil.which("tesseract"))},
                 "tmp_dir": tmp, "tmp_free_bytes": free,
@@ -194,6 +194,47 @@ spec:
           mode: { type: string, default: demo }
         required: [job_id]
       code: |
+        def _stage_input_video(file_id, context):
+            # Download an uploaded clip2trace/input-videos file to /tmp so PyAV can
+            # decode it. The runtime base URL is the sinas SDK default
+            # (host.docker.internal:8000), NOT in env/context — see
+            # docs/research/runtime-diagnostics.md. Bounded to ~90 MB (100 MB /tmp).
+            import os, base64, tempfile
+            context = context or {}
+            token = context.get("access_token")
+            if not file_id or not token:
+                return None
+            base = (context.get("api_url") or context.get("base_url")
+                    or os.environ.get("SINAS_BASE_URL")
+                    or "http://host.docker.internal:8000").rstrip("/")
+            # The files API is name-addressed and returns a JSON envelope
+            # {content_base64, content_type, ...} — decode it to a local file.
+            from urllib.parse import quote
+            url = "%s/files/clip2trace/input-videos/%s" % (
+                base, quote(str(file_id), safe=""))
+            name = os.path.basename(str(file_id))
+            path = os.path.join(tempfile.gettempdir(),
+                                name if "." in name else name + ".mp4")
+            cap = 90 * 1024 * 1024
+            try:
+                import requests
+                resp = requests.get(
+                    url, timeout=120,
+                    headers={"Authorization": "Bearer %s" % token})
+                if resp.status_code != 200:
+                    return None
+                b64 = (resp.json() or {}).get("content_base64")
+                if not b64 or (len(b64) * 3) // 4 > cap:
+                    return None
+                raw = base64.b64decode(b64)
+                if len(raw) > cap:
+                    return None
+                with open(path, "wb") as fh:
+                    fh.write(raw)
+                return path
+            except Exception:
+                return None
+
         def handler(input_data, context):
             job_id = input_data.get("job_id")
             if not job_id:
@@ -203,6 +244,13 @@ spec:
             duration = input_data.get("duration_sec")
             diagnostics = []
             segments, method = [], "demo_fixture"
+
+            file_id = input_data.get("input_video_file_id")
+            if not video_path and file_id:
+                video_path = _stage_input_video(file_id, context)
+                diagnostics.append(
+                    ("staged input video %s" % file_id) if video_path
+                    else ("input video %s could not be staged" % file_id))
 
             def windows_to_segments(wins, likelihood, reason):
                 return [{"segment_id": "seg_%03d" % i,
@@ -227,26 +275,43 @@ spec:
                 if not segments:
                     try:
                         import av, numpy as np
+                        # Color-histogram shot detection: a static overlay cancels in
+                        # the histogram diff (unlike a grayscale pixel mean, which it
+                        # dilutes), and color separates same-luma scenes.
+                        def _feat(im):
+                            sc = max(1, int(max(im.shape[:2]) / 128))
+                            s = im[::sc, ::sc]; out = []
+                            for ch in range(3):
+                                h, _e = np.histogram(s[:, :, ch], bins=16, range=(0, 255))
+                                h = h.astype("float32"); tot = h.sum()
+                                out.append(h / tot if tot else h)
+                            return out
                         c = av.open(video_path)
                         try:
                             vs = c.streams.video[0]; tb = vs.time_base
-                            prev = None; cuts = [0.0]; last = 0.0; nxt = 0.0
+                            prev = None; last = 0.0; nxt = 0.0; ts = []; ds = []
                             for fr in c.decode(vs):
                                 tt = float(fr.pts * tb) if fr.pts is not None else last
                                 last = tt
                                 if tt + 1e-9 < nxt:
                                     continue
                                 nxt = tt + 1.0 / 3.0
-                                a = fr.to_ndarray(format="gray8")
-                                sc = max(1, int(max(a.shape) / 128))
-                                sm = a[::sc, ::sc].astype("float32") / 255.0
-                                if (prev is not None and prev.shape == sm.shape
-                                        and float(np.mean(np.abs(sm - prev))) > 0.3):
-                                    cuts.append(tt)
-                                prev = sm
+                                f = _feat(fr.to_ndarray(format="rgb24"))
+                                if prev is not None:
+                                    ds.append(float(np.mean(
+                                        [0.5 * np.abs(f[k] - prev[k]).sum()
+                                         for k in range(3)])))
+                                    ts.append(tt)
+                                prev = f
                             dur = float(vs.duration * tb) if vs.duration else last
                         finally:
                             c.close()
+                        cuts = [0.0]; lc = -1e9
+                        for i in range(len(ds)):
+                            lm = ((i == 0 or ds[i] >= ds[i - 1])
+                                  and (i + 1 >= len(ds) or ds[i] >= ds[i + 1]))
+                            if ds[i] > 0.25 and lm and ts[i] - lc >= 1.5:
+                                cuts.append(ts[i]); lc = ts[i]
                         b = sorted(set(cuts + [dur]))
                         wins = [{"start_sec": round(x, 2), "end_sec": round(y, 2)}
                                 for x, y in zip(b, b[1:]) if y - x > 0.1]
@@ -297,12 +362,58 @@ spec:
           duration_sec: { type: number }
         required: [job_id]
       code: |
+        def _stage_input_video(file_id, context):
+            # Download an uploaded clip2trace/input-videos file to /tmp for decode.
+            # Base URL = sinas SDK default (not in env/context); bounded ~90 MB.
+            import os, base64, tempfile
+            context = context or {}
+            token = context.get("access_token")
+            if not file_id or not token:
+                return None
+            base = (context.get("api_url") or context.get("base_url")
+                    or os.environ.get("SINAS_BASE_URL")
+                    or "http://host.docker.internal:8000").rstrip("/")
+            # The files API is name-addressed and returns a JSON envelope
+            # {content_base64, content_type, ...} — decode it to a local file.
+            from urllib.parse import quote
+            url = "%s/files/clip2trace/input-videos/%s" % (
+                base, quote(str(file_id), safe=""))
+            name = os.path.basename(str(file_id))
+            path = os.path.join(tempfile.gettempdir(),
+                                name if "." in name else name + ".mp4")
+            cap = 90 * 1024 * 1024
+            try:
+                import requests
+                resp = requests.get(
+                    url, timeout=120,
+                    headers={"Authorization": "Bearer %s" % token})
+                if resp.status_code != 200:
+                    return None
+                b64 = (resp.json() or {}).get("content_base64")
+                if not b64 or (len(b64) * 3) // 4 > cap:
+                    return None
+                raw = base64.b64decode(b64)
+                if len(raw) > cap:
+                    return None
+                with open(path, "wb") as fh:
+                    fh.write(raw)
+                return path
+            except Exception:
+                return None
+
         def handler(input_data, context):
             if not input_data.get("job_id"):
                 return {"error": "job_id is required"}
             video_path = input_data.get("video_path")
             duration = input_data.get("duration_sec")
             diagnostics = []
+
+            file_id = input_data.get("input_video_file_id")
+            if not video_path and file_id:
+                video_path = _stage_input_video(file_id, context)
+                diagnostics.append(
+                    ("staged input video %s" % file_id) if video_path
+                    else ("input video %s could not be staged" % file_id))
 
             def windows_to_segments(wins, likelihood, reason):
                 return [{"segment_id": "seg_%03d" % i,
@@ -326,26 +437,43 @@ spec:
                     diagnostics.append("shot detection unavailable: %r" % (exc,))
                 try:
                     import av, numpy as np
+                    # Color-histogram shot detection (see analyze_input_video): a
+                    # static overlay cancels in the histogram diff and color separates
+                    # same-luma scenes, fixing under-segmentation of compilations.
+                    def _feat(im):
+                        sc = max(1, int(max(im.shape[:2]) / 128))
+                        s = im[::sc, ::sc]; out = []
+                        for ch in range(3):
+                            h, _e = np.histogram(s[:, :, ch], bins=16, range=(0, 255))
+                            h = h.astype("float32"); tot = h.sum()
+                            out.append(h / tot if tot else h)
+                        return out
                     c = av.open(video_path)
                     try:
                         vs = c.streams.video[0]; tb = vs.time_base
-                        prev = None; cuts = [0.0]; last = 0.0; nxt = 0.0
+                        prev = None; last = 0.0; nxt = 0.0; ts = []; ds = []
                         for fr in c.decode(vs):
                             tt = float(fr.pts * tb) if fr.pts is not None else last
                             last = tt
                             if tt + 1e-9 < nxt:
                                 continue
                             nxt = tt + 1.0 / 3.0
-                            a = fr.to_ndarray(format="gray8")
-                            sc = max(1, int(max(a.shape) / 128))
-                            sm = a[::sc, ::sc].astype("float32") / 255.0
-                            if (prev is not None and prev.shape == sm.shape
-                                    and float(np.mean(np.abs(sm - prev))) > 0.3):
-                                cuts.append(tt)
-                            prev = sm
+                            f = _feat(fr.to_ndarray(format="rgb24"))
+                            if prev is not None:
+                                ds.append(float(np.mean(
+                                    [0.5 * np.abs(f[k] - prev[k]).sum()
+                                     for k in range(3)])))
+                                ts.append(tt)
+                            prev = f
                         dur = float(vs.duration * tb) if vs.duration else last
                     finally:
                         c.close()
+                    cuts = [0.0]; lc = -1e9
+                    for i in range(len(ds)):
+                        lm = ((i == 0 or ds[i] >= ds[i - 1])
+                              and (i + 1 >= len(ds) or ds[i] >= ds[i + 1]))
+                        if ds[i] > 0.25 and lm and ts[i] - lc >= 1.5:
+                            cuts.append(ts[i]); lc = ts[i]
                     b = sorted(set(cuts + [dur]))
                     wins = [{"start_sec": round(x, 2), "end_sec": round(y, 2)}
                             for x, y in zip(b, b[1:]) if y - x > 0.1]
@@ -393,6 +521,7 @@ spec:
           text_hint: { type: string }
           caption: { type: string }
           ocr_text: { type: string }
+          input_video_file_id: { type: string }
           video_path: { type: string }
           start_sec: { type: number }
           end_sec: { type: number }
@@ -400,6 +529,45 @@ spec:
           keyframe_file_ids: { type: array, items: { type: string } }
         required: [job_id, segment_id]
       code: |
+        def _stage_input_video(file_id, context):
+            # Download an uploaded clip2trace/input-videos file to /tmp for keyframe
+            # extraction. Base URL = sinas SDK default (not in env/context); ~90 MB cap.
+            import os, base64, tempfile
+            context = context or {}
+            token = context.get("access_token")
+            if not file_id or not token:
+                return None
+            base = (context.get("api_url") or context.get("base_url")
+                    or os.environ.get("SINAS_BASE_URL")
+                    or "http://host.docker.internal:8000").rstrip("/")
+            # The files API is name-addressed and returns a JSON envelope
+            # {content_base64, content_type, ...} — decode it to a local file.
+            from urllib.parse import quote
+            url = "%s/files/clip2trace/input-videos/%s" % (
+                base, quote(str(file_id), safe=""))
+            name = os.path.basename(str(file_id))
+            path = os.path.join(tempfile.gettempdir(),
+                                name if "." in name else name + ".mp4")
+            cap = 90 * 1024 * 1024
+            try:
+                import requests
+                resp = requests.get(
+                    url, timeout=120,
+                    headers={"Authorization": "Bearer %s" % token})
+                if resp.status_code != 200:
+                    return None
+                b64 = (resp.json() or {}).get("content_base64")
+                if not b64 or (len(b64) * 3) // 4 > cap:
+                    return None
+                raw = base64.b64decode(b64)
+                if len(raw) > cap:
+                    return None
+                with open(path, "wb") as fh:
+                    fh.write(raw)
+                return path
+            except Exception:
+                return None
+
         def handler(input_data, context):
             import re
             if not input_data.get("job_id") or not input_data.get("segment_id"):
@@ -418,6 +586,13 @@ spec:
             video_path = input_data.get("video_path")
             start, end = input_data.get("start_sec"), input_data.get("end_sec")
             diagnostics = []
+
+            file_id = input_data.get("input_video_file_id")
+            if not video_path and file_id:
+                video_path = _stage_input_video(file_id, context)
+                diagnostics.append(
+                    ("staged input video %s" % file_id) if video_path
+                    else ("input video %s could not be staged" % file_id))
 
             # #10 visual: keyframes -> perceptual hashes (full + center-crop).
             # Decode with OpenCV if present, else PyAV (bundles ffmpeg; no system
@@ -499,7 +674,8 @@ spec:
                     from PIL import Image
                     ctx = context or {}
                     base = (ctx.get("api_url") or ctx.get("base_url")
-                            or os.environ.get("SINAS_BASE_URL"))
+                            or os.environ.get("SINAS_BASE_URL")
+                            or "http://host.docker.internal:8000")
                     token = ctx.get("access_token")
                     if base and token:
                         buf = io.BytesIO()
@@ -551,6 +727,71 @@ spec:
                     "ocr_text": ocr_text, "visible_handles": handles,
                     "context_terms": context_terms, "ocr_available": ocr_available,
                     "diagnostics": diagnostics, "implemented": True}
+
+    - namespace: clip2trace
+      name: cluster_segments
+      description: Cluster repeated footage across segments; link a candidate to timestamps.
+      timeout: 30
+      inputSchema:
+        type: object
+        properties:
+          segments: { type: array, items: { type: object } }
+          candidate_phashes: { type: array, items: { type: string } }
+          threshold: { type: number }
+        required: [segments]
+      code: |
+        def handler(input_data, context):
+            # #25: greedy single-link clustering on cross-segment perceptual-hash
+            # similarity (port of clip2trace.matching.cluster_segments +
+            # link_candidate_to_segments; kept self-contained for the sandbox).
+            segments = input_data.get("segments") or []
+            threshold = input_data.get("threshold")
+            threshold = 0.85 if threshold is None else float(threshold)
+            bits = 64
+
+            def _sim(ha, hb):
+                if len(ha) != len(hb):
+                    return 0.0
+                d = bin(int(ha, 16) ^ int(hb, 16)).count("1")
+                return max(0.0, 1.0 - d / float(bits))
+
+            def _best(a, b):
+                best = 0.0
+                for ha in a:
+                    for hb in b:
+                        try:
+                            s = _sim(ha, hb)
+                        except Exception:
+                            continue
+                        if s > best:
+                            best = s
+                return best
+
+            clusters = []
+            for seg in segments:
+                sid = seg.get("segment_id")
+                ph = list(seg.get("phashes") or [])
+                placed = False
+                for cl in clusters:
+                    if ph and _best(ph, cl["phashes"]) >= threshold:
+                        cl["segment_ids"].append(sid)
+                        cl["phashes"].extend(ph)
+                        placed = True
+                        break
+                if not placed:
+                    clusters.append({"cluster_id": "cluster_%03d" % (len(clusters) + 1),
+                                     "segment_ids": [sid], "phashes": list(ph)})
+
+            out = [{"cluster_id": c["cluster_id"], "segment_ids": c["segment_ids"]}
+                   for c in clusters]
+            result = {"clusters": out, "cluster_count": len(out),
+                      "implemented": True}
+            cand = list(input_data.get("candidate_phashes") or [])
+            if cand:
+                result["linked_segment_ids"] = [
+                    seg.get("segment_id") for seg in segments
+                    if _best(cand, list(seg.get("phashes") or [])) >= threshold]
+            return result
 
     - namespace: clip2trace
       name: generate_telegram_queries
@@ -923,6 +1164,7 @@ spec:
         properties:
           job_id: { type: string }
           segments: { type: array, items: { type: object } }
+          clusters: { type: array, items: { type: object } }
           ranked_candidates: { type: array, items: { type: object } }
           mode: { type: string, default: demo }
           output_format: { type: string, enum: [json, html, both], default: json }
@@ -936,12 +1178,17 @@ spec:
             ranked = input_data.get("ranked_candidates") or []
             kept = [c for c in ranked if not c.get("rejected")]
             mode = input_data.get("mode", "demo")
+            # #25: repeated footage — only clusters covering >1 segment are notable.
+            clusters = input_data.get("clusters") or []
+            repeated = [c for c in clusters
+                        if len(c.get("segment_ids") or []) > 1]
             report = {
                 "job_id": job_id,
                 "summary": ("Likely Telegram source candidates for human "
                             "verification; not confirmed sources."),
                 "generated_mode": mode,
                 "segments": input_data.get("segments") or [],
+                "repeated_footage": repeated,
                 "ranked_candidates": kept,
                 "caveats": [
                     "Global Telegram search is retrieval, not proof of origin.",
@@ -975,17 +1222,27 @@ spec:
                                      lbl, img, esc(c.get("candidate_id")), lbl,
                                      esc(c.get("confidence", 0)), link))
                 cav = "".join("<li>%s</li>" % esc(x) for x in report["caveats"])
+                rep = ""
+                if repeated:
+                    items = "".join(
+                        "<li><code>%s</code>: reused across %s</li>" % (
+                            esc(c.get("cluster_id")),
+                            esc(", ".join(c.get("segment_ids") or [])))
+                        for c in repeated)
+                    rep = ("<h2>Repeated footage</h2><p>Same footage detected at "
+                           "multiple timestamps:</p><ul>%s</ul>" % items)
                 result["report_html"] = (
                     "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
                     "<title>clip2trace provenance report — %s</title></head><body>"
                     "<h1>clip2trace provenance report</h1>"
                     "<p>job <code>%s</code> · mode <code>%s</code></p>"
-                    "<p>%s</p><h2>Likely Telegram source candidates</h2>%s"
+                    "<p>%s</p><h2>Likely Telegram source candidates</h2>%s%s"
                     "<h2>Caveats</h2><ul>%s</ul>"
                     "<footer>Likely candidates for human verification — not "
                     "confirmed sources.</footer></body></html>" % (
                         esc(job_id), esc(job_id), esc(mode), esc(report["summary"]),
-                        ("\n".join(cards) or "<p>No candidates retained.</p>"), cav))
+                        ("\n".join(cards) or "<p>No candidates retained.</p>"),
+                        rep, cav))
             return result
 
   skills:
@@ -1025,7 +1282,14 @@ spec:
         immediately call create_job(mode="demo") and run the pipeline; the
         functions return the bundled demo fixtures (segments + cached Telegram
         candidates), so produce the full provenance report without any upload. Only
-        request an input video for live/hybrid runs that need real footage. When
+        request an input video for live/hybrid runs that need real footage. For
+        live/hybrid runs, capture the uploaded input_video_file_id in create_job and
+        PASS it to analyze_input_video so the function downloads the real video to the
+        worker and decodes it (otherwise it falls back to demo segments). After
+        segments have phashes, call cluster_segments to group footage reused at
+        multiple timestamps, and pass its clusters to render_report; when a candidate
+        matches, also call cluster_segments with that candidate's phashes to link it
+        to every matching timestamp (one candidate -> many segments). When
         calling verify_media_similarity, you MUST pass segment_phashes (the
         segment's phashes), candidate_phashes (the candidate's phashes),
         segment_text (the segment's ocr_text), candidate_text (the candidate's
@@ -1042,6 +1306,7 @@ spec:
       enabledFunctions:
         - clip2trace/create_job
         - clip2trace/analyze_input_video
+        - clip2trace/cluster_segments
         - clip2trace/search_global_telegram_posts
         - clip2trace/fetch_telegram_candidate_media
         - clip2trace/verify_media_similarity
@@ -1065,10 +1330,13 @@ spec:
         See agents/source-segment-analyst.md. Detect candidate segments and extract
         clues, then PERSIST each segment with its clues (visible_handles, ocr_text,
         context_terms, phashes) to the clip2trace/segments store, keyed by
-        segment_id, so later steps and the dashboard can read them.
+        segment_id, so later steps and the dashboard can read them. For live/hybrid
+        runs, pass the job's input_video_file_id into detect_source_segments and
+        extract_segment_clues so they decode the real uploaded video.
       enabledFunctions:
         - clip2trace/detect_source_segments
         - clip2trace/extract_segment_clues
+        - clip2trace/cluster_segments
       enabledStores:
         - { store: clip2trace/segments, access: readwrite }
     - namespace: clip2trace
@@ -1146,6 +1414,7 @@ spec:
         - { type: function, namespace: clip2trace, name: analyze_input_video }
         - { type: function, namespace: clip2trace, name: detect_source_segments }
         - { type: function, namespace: clip2trace, name: extract_segment_clues }
+        - { type: function, namespace: clip2trace, name: cluster_segments }
         - { type: function, namespace: clip2trace, name: generate_telegram_queries }
         - { type: function, namespace: clip2trace, name: search_global_telegram_posts }
         - { type: function, namespace: clip2trace, name: fetch_telegram_candidate_media }

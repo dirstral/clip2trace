@@ -19,6 +19,22 @@ def handler(input_data, context):
     duration = input_data.get("duration_sec")
     diagnostics = []
 
+    # #36: for a real upload, download the input-videos file to /tmp so PyAV can
+    # decode it. The inline YAML copy carries a self-contained equivalent.
+    file_id = input_data.get("input_video_file_id")
+    if not video_path and file_id:
+        try:
+            from clip2trace.storage import stage_input_file
+
+            video_path = stage_input_file(file_id, context)
+        except Exception as exc:
+            diagnostics.append(f"input staging failed: {exc!r}")
+        diagnostics.append(
+            f"staged input video {file_id}"
+            if video_path
+            else f"input video {file_id} could not be staged"
+        )
+
     segments = []
     method = "demo_fixture"
     if video_path:
