@@ -24,6 +24,10 @@ corpus/
 *.ts
 # allow tiny tracked test assets explicitly if ever needed:
 !tests/fixtures/**/*.json
+# Demo sample videos are tracked on purpose (they ARE the demo inputs).
+# This overrides the media patterns above for the samples/ folder only.
+!samples/
+!samples/**
 
 # --- Python ---
 __pycache__/
