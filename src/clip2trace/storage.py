@@ -115,12 +115,15 @@ def stage_input_file(file_id: str, context: Optional[Dict[str, Any]] = None, *,
     import os
     import base64
     import tempfile
+    from urllib.parse import quote
     context = context or {}
     token = context.get("access_token")
     if not file_id or not token:
         return None
     base = resolve_runtime_base_url(context).rstrip("/")
-    url = f"{base}/files/{namespace}/{collection}/{file_id}"
+    # File names may contain spaces/brackets/# (Sinas `name` pattern is ^[^/]+$),
+    # so percent-encode the path segment; the runtime decodes it server-side.
+    url = f"{base}/files/{namespace}/{collection}/{quote(str(file_id), safe='')}"
     dest_dir = dest_dir or tempfile.gettempdir()
     name = os.path.basename(str(file_id))
     path = os.path.join(dest_dir, name if "." in name else name + ".mp4")

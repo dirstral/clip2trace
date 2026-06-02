@@ -99,7 +99,8 @@ def start_files_stub(instance_dir: str):
     """Serve GET /files/{ns}/{collection}/{name} like the real Sinas files API."""
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
-            name = self.path.rstrip("/").split("/")[-1].split("?")[0]
+            from urllib.parse import unquote
+            name = unquote(self.path.rstrip("/").split("/")[-1].split("?")[0])
             fp = os.path.join(instance_dir, "input-videos", name)
             if not os.path.isfile(fp):
                 self.send_response(404)

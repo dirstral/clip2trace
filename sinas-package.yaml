@@ -209,7 +209,9 @@ spec:
                     or "http://host.docker.internal:8000").rstrip("/")
             # The files API is name-addressed and returns a JSON envelope
             # {content_base64, content_type, ...} — decode it to a local file.
-            url = "%s/files/clip2trace/input-videos/%s" % (base, file_id)
+            from urllib.parse import quote
+            url = "%s/files/clip2trace/input-videos/%s" % (
+                base, quote(str(file_id), safe=""))
             name = os.path.basename(str(file_id))
             path = os.path.join(tempfile.gettempdir(),
                                 name if "." in name else name + ".mp4")
@@ -356,7 +358,9 @@ spec:
                     or "http://host.docker.internal:8000").rstrip("/")
             # The files API is name-addressed and returns a JSON envelope
             # {content_base64, content_type, ...} — decode it to a local file.
-            url = "%s/files/clip2trace/input-videos/%s" % (base, file_id)
+            from urllib.parse import quote
+            url = "%s/files/clip2trace/input-videos/%s" % (
+                base, quote(str(file_id), safe=""))
             name = os.path.basename(str(file_id))
             path = os.path.join(tempfile.gettempdir(),
                                 name if "." in name else name + ".mp4")
@@ -504,7 +508,9 @@ spec:
                     or "http://host.docker.internal:8000").rstrip("/")
             # The files API is name-addressed and returns a JSON envelope
             # {content_base64, content_type, ...} — decode it to a local file.
-            url = "%s/files/clip2trace/input-videos/%s" % (base, file_id)
+            from urllib.parse import quote
+            url = "%s/files/clip2trace/input-videos/%s" % (
+                base, quote(str(file_id), safe=""))
             name = os.path.basename(str(file_id))
             path = os.path.join(tempfile.gettempdir(),
                                 name if "." in name else name + ".mp4")

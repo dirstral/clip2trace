@@ -56,6 +56,18 @@ def test_stage_input_file_keeps_existing_extension(monkeypatch, tmp_path):
     assert path is not None and path.endswith("clip.mov")
 
 
+def test_stage_input_file_url_encodes_spaces_and_brackets(monkeypatch, tmp_path):
+    # Sinas file names may contain spaces/brackets (pattern ^[^/]+$); the path
+    # segment must be percent-encoded so the request reaches the right file.
+    captured = {}
+    monkeypatch.setattr(requests, "get", _fake_get(captured))
+    name = "Israel castle [CtaT27mc3bU].mkv"
+    path = stage_input_file(name, {"access_token": "t"}, dest_dir=str(tmp_path))
+    assert path is not None and path.endswith(name)  # local file keeps real name
+    assert "Israel%20castle%20%5BCtaT27mc3bU%5D.mkv" in captured["url"]
+    assert " " not in captured["url"] and "[" not in captured["url"]
+
+
 def test_stage_input_file_requires_token_and_file_id(monkeypatch, tmp_path):
     monkeypatch.setattr(requests, "get", _fake_get({}))
     assert stage_input_file("vid", {}, dest_dir=str(tmp_path)) is None
