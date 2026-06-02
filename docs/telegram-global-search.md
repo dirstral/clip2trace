@@ -16,6 +16,14 @@ This is the implementation plan. The feasibility findings live in
   `context["secrets"]` (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`,
   `TELEGRAM_SESSION_STRING`) and calls
   `functions.channels.SearchPostsRequest(hashtag=... | query=..., ...)`.
+- Implemented in `src/clip2trace/telegram_live.py` (`TelethonSearchClient` +
+  `build_client_from_secrets`): pure query-routing / normalisation / pagination
+  logic (unit-tested without Telethon) plus a thin, lazily-imported Telethon
+  glue. `build_client_from_secrets` returns `None` when Telethon or any secret is
+  missing, so the function reports `live_unavailable` instead of faking a search.
+  The deployable `sinas-package.yaml` inline `code:` block carries a
+  self-contained mirror of this logic (the sandbox can't import clip2trace), kept
+  runnable in demo mode and guarded by `tests/test_package_inline_sync.py`.
 - Exactly one of `hashtag` / `query` per call. Prefer **handle/hashtag** queries
   (unmetered) over free-text (metered → Stars).
 - Paginate with `offset_rate`/`offset_peer`/`offset_id`; read `next_rate`.
