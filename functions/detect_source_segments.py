@@ -20,6 +20,18 @@ def handler(input_data, context):
     duration = input_data.get("duration_sec")
     diagnostics = []
 
+    # #36: stage a real uploaded video to /tmp for decode (self-contained in YAML).
+    file_id = input_data.get("input_video_file_id")
+    if not video_path and file_id:
+        try:
+            from clip2trace.storage import stage_input_file
+            video_path = stage_input_file(file_id, context)
+        except Exception as exc:
+            diagnostics.append(f"input staging failed: {exc!r}")
+        diagnostics.append(
+            f"staged input video {file_id}" if video_path
+            else f"input video {file_id} could not be staged")
+
     # 1. Real shot detection.
     if video_path:
         try:

@@ -20,6 +20,7 @@ FUNCTION_FILES = [
     "analyze_input_video",
     "detect_source_segments",
     "extract_segment_clues",
+    "cluster_segments",
     "generate_telegram_queries",
     "search_global_telegram_posts",
     "fetch_telegram_candidate_media",
@@ -36,6 +37,9 @@ MINIMAL_INPUT = {
         "job_id": "job_x",
         "segment_id": "seg_001",
         "text_hint": "follow @demo_channel",
+    },
+    "cluster_segments": {
+        "segments": [{"segment_id": "seg_001", "phashes": ["c3e1c3e1c3e1c3e1"]}]
     },
     "generate_telegram_queries": {"visible_handles": ["demo_channel"]},
     "search_global_telegram_posts": {"mode": "demo"},

@@ -55,9 +55,16 @@ def build_report(
     *,
     mode: str = "demo",
     summary: str = "",
+    clusters: List[Dict] = None,
 ) -> Dict:
-    """Assemble the report JSON dict (schemas.ProvenanceReport shape)."""
+    """Assemble the report JSON dict (schemas.ProvenanceReport shape).
+
+    `clusters` (#25): cluster_segments output; clusters covering >1 segment are
+    surfaced as `repeated_footage` (same footage reused at multiple timestamps).
+    """
     kept = [c for c in ranked_candidates if not c.get("rejected")]
+    repeated = [c for c in (clusters or [])
+                if len(c.get("segment_ids") or []) > 1]
     label_counts: Dict[str, int] = {}
     for c in kept:
         label_counts[c.get("confidence_label", "unknown")] = (
@@ -77,6 +84,7 @@ def build_report(
         "summary": _sanitise(summary),
         "generated_mode": mode,
         "segments": segments,
+        "repeated_footage": repeated,
         "ranked_candidates": kept,
         "label_counts": label_counts,
         "caveats": list(GLOBAL_CAVEATS),
@@ -171,6 +179,17 @@ def render_html(report: Dict) -> str:
     )
     global_cav = "".join(f"<li>{esc(x)}</li>" for x in (r.get("caveats") or []))
 
+    repeated = r.get("repeated_footage") or []
+    repeated_html = ""
+    if repeated:
+        items = "".join(
+            f"<li><code>{esc(c.get('cluster_id'))}</code>: reused across "
+            f"{esc(', '.join(c.get('segment_ids') or []))}</li>"
+            for c in repeated)
+        repeated_html = ("<h2>Repeated footage</h2>"
+                         "<p>Same footage detected at multiple timestamps:</p>"
+                         f"<ul>{items}</ul>")
+
     out = (
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
@@ -186,6 +205,7 @@ def render_html(report: Dict) -> str:
         f"<tbody>{seg_rows}</tbody></table>"
         "<h2>Likely Telegram source candidates</h2>"
         f"{cards_html}"
+        f"{repeated_html}"
         f"<h2>Caveats</h2><ul>{global_cav}</ul>"
         "<footer>Likely candidates for human verification — not confirmed "
         "sources. Global Telegram search is retrieval, not proof.</footer>"

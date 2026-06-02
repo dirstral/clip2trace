@@ -112,7 +112,14 @@ def resolve_runtime(context) -> tuple:
     import os
 
     ctx = context or {}
-    base = ctx.get("api_url") or ctx.get("base_url") or os.environ.get("SINAS_BASE_URL")
+    # Falls back to the sinas SDK default base URL (host.docker.internal:8000) — it
+    # is hardcoded in the worker, not delivered via env/context. See storage.py.
+    base = (
+        ctx.get("api_url")
+        or ctx.get("base_url")
+        or os.environ.get("SINAS_BASE_URL")
+        or "http://host.docker.internal:8000"
+    )
     token = ctx.get("access_token")
     return base, token
 
