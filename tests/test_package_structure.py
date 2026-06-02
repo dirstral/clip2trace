@@ -89,6 +89,10 @@ def test_agent_and_component_enabled_refs_resolve():
             ref = st["store"] if isinstance(st, dict) else st
             assert _name(ref) in decl["store"], \
                 f"{agent['name']} enables missing store {ref}"
+        for col in agent.get("enabledCollections") or []:
+            ref = col["collection"] if isinstance(col, dict) else col
+            assert _name(ref) in decl["collection"], \
+                f"{agent['name']} enables missing collection {ref}"
 
     for comp in spec.get("components") or []:
         for fn in comp.get("enabledFunctions") or []:
@@ -98,3 +102,28 @@ def test_agent_and_component_enabled_refs_resolve():
             ref = st["store"] if isinstance(st, dict) else st
             assert _name(ref) in decl["store"], \
                 f"{comp['name']} enables missing store {ref}"
+
+
+def _agent(spec, name):
+    return next(a for a in spec["agents"] if a["name"] == name)
+
+
+def test_persistence_owning_agents_have_required_access():
+    """Persistence is agent-layer (functions are pure). Guard the access grants."""
+    spec = _spec()
+
+    def store_access(agent, store):
+        for s in agent.get("enabledStores") or []:
+            if _name(s["store"]) == store:
+                return s.get("access")
+        return None
+
+    coordinator = _agent(spec, "coordinator")
+    assert store_access(coordinator, "jobs") == "readwrite", \
+        "coordinator must read/write the jobs store (job lifecycle persistence)"
+
+    report_writer = _agent(spec, "report-writer")
+    assert store_access(report_writer, "jobs") == "readwrite", \
+        "report-writer must write the final job status"
+    cols = {_name(c["collection"]) for c in report_writer.get("enabledCollections") or []}
+    assert "reports" in cols, "report-writer must access the reports collection"

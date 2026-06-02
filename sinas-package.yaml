@@ -824,8 +824,15 @@ spec:
       model: claude-sonnet-4-6
       temperature: 0.2
       systemPrompt: |
-        See agents/coordinator.md. Orchestrate the pipeline, report job status,
-        and never claim an original source — only likely candidates with caveats.
+        See agents/coordinator.md. Orchestrate the pipeline and never claim an
+        original source — only likely candidates with caveats. PERSIST job state to
+        the clip2trace/jobs store (key = job_id): write the status on each step
+        (created -> analyzing -> searching -> verifying -> ranking -> reporting ->
+        done), and on failure set status=failed with the error message. Persist
+        segments to clip2trace/segments, search hits to clip2trace/search-results,
+        and media matches to clip2trace/candidate-matches as they are produced.
+        (Functions are pure transforms — they return data; you hold the store
+        access and are responsible for persistence.)
       enabledFunctions:
         - clip2trace/create_job
         - clip2trace/analyze_input_video
@@ -849,7 +856,10 @@ spec:
       model: claude-sonnet-4-6
       temperature: 0.2
       systemPrompt: |
-        See agents/source-segment-analyst.md.
+        See agents/source-segment-analyst.md. Detect candidate segments and extract
+        clues, then PERSIST each segment with its clues (visible_handles, ocr_text,
+        context_terms, phashes) to the clip2trace/segments store, keyed by
+        segment_id, so later steps and the dashboard can read them.
       enabledFunctions:
         - clip2trace/detect_source_segments
         - clip2trace/extract_segment_clues
@@ -891,13 +901,18 @@ spec:
       model: claude-sonnet-4-6
       temperature: 0.2
       systemPrompt: |
-        See agents/report-writer.md.
+        See agents/report-writer.md. Render the provenance report (cautious
+        language; never "original"). SAVE the report JSON to the clip2trace/reports
+        collection (metadata: job_id) and set the job's status to "done" in the
+        clip2trace/jobs store.
       enabledFunctions:
         - clip2trace/render_report
       enabledSkills:
         - { skill: clip2trace/report-style, preload: true }
       enabledStores:
-        - { store: clip2trace/jobs, access: readonly }
+        - { store: clip2trace/jobs, access: readwrite }
+      enabledCollections:
+        - { collection: clip2trace/reports, access: readwrite }
 
   components:
     - namespace: clip2trace

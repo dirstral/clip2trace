@@ -105,6 +105,22 @@ worker. The full visual pipeline is live with **zero infra changes**.
 - Routing note: the adapter maps `model:"namespace/name"` to an **agent** instead
   of a direct-LLM call.
 
+**Function runtime address — there is none (persistence is agent-layer).** The
+probe also dumped `env_keys` + `context_keys`: a function gets
+`context["access_token"]` but **no base URL** anywhere (`env_keys` = HOME, PATH,
+WORKER_ID, WORKER_MODE, SINAS_CONTAINER_MODE, … ; `context_keys` = access_token,
+execution_id, secrets, user_id, …). There's no preinstalled `sinas` SDK either.
+So a function **cannot call back** to `POST /states` / `POST /files/...` — it can't
+construct the URL. This matches the package design: **functions declare no store
+access; agents do** (`coordinator`/`report-writer` carry `enabledStores` /
+`enabledCollections` readwrite). **Decision: persistence is agent-layer** — functions
+are pure transforms that return data, and the orchestrating agents persist it
+(job lifecycle → `clip2trace/jobs`, segments → `clip2trace/segments`, report →
+`clip2trace/reports`). (Keyframe *image* files aren't stored — functions return
+perceptual hashes, which is what visual verification needs; raw-frame upload would
+require the missing function runtime address.) See the agent prompts in
+`sinas-package.yaml` + `agents/*.md`.
+
 **Follow-up (#33, OPTIONAL acceleration — operator-only):** if the Sinas/WeAreBrain
 operator ever adds `libGL`+opencv/scenedetect and `ffmpeg`/`tesseract` to the
 managed worker image, clip2trace uses them automatically for faster native

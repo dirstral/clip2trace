@@ -33,3 +33,12 @@ handles, contextual terms.
 ## Rules
 - Prefer high-signal clues (visible handles, watermarks, exact on-screen text).
 - Do not infer beyond the visible evidence. Mark uncertainty honestly.
+
+## Persistence
+`detect_source_segments`/`extract_segment_clues` only return data (functions are
+pure on the managed worker). Persist each segment with its clues
+(`visible_handles`, `ocr_text`, `context_terms`, `phashes`) to the
+**clip2trace/segments** store, keyed by `segment_id`. (Keyframe *image* files
+aren't stored — the function returns perceptual hashes, which is what visual
+verification uses; raw-frame upload would need a function runtime address the
+managed worker doesn't provide.)

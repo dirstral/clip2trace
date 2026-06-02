@@ -19,3 +19,10 @@ Write a concise **provenance report** for human verification.
 4. Caveats (global): retrieval ≠ proof; reposts; private/deleted out of scope;
    automated confidence requires human verification.
 5. Recommended next steps for a human reviewer.
+
+## Persistence
+`render_report` returns the report JSON (functions are pure on the managed
+worker). You persist it:
+- Save the report JSON to the **clip2trace/reports** collection (metadata:
+  `job_id`); keep the returned file id with the job.
+- Set the job's `status` to `done` in the **clip2trace/jobs** store.
