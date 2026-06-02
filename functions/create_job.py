@@ -8,8 +8,13 @@ an in-memory store; inside Sinas, wire this to the clip2trace/jobs state store
 
 from __future__ import annotations
 
-_META_FIELDS = ("input_video_file_id", "video_context", "date_hint",
-                "language_hint", "topic_hint")
+_META_FIELDS = (
+    "input_video_file_id",
+    "video_context",
+    "date_hint",
+    "language_hint",
+    "topic_hint",
+)
 
 
 def handler(input_data, context):
@@ -23,10 +28,16 @@ def handler(input_data, context):
 
     try:
         from clip2trace.storage import build_job_state
+
         state = build_job_state(job_id, mode=mode, **meta)
     except Exception:
-        state = {"job_id": job_id, "status": "created", "mode": mode,
-                 "progress": 0.0, "error": None}
+        state = {
+            "job_id": job_id,
+            "status": "created",
+            "mode": mode,
+            "progress": 0.0,
+            "error": None,
+        }
         state.update(meta)
 
     state["next_step"] = "analyze_input_video"

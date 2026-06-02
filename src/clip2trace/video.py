@@ -27,8 +27,13 @@ def capabilities() -> dict:
 
 # ── Shot detection ────────────────────────────────────────────────────────────
 
-def _detect_shots_av(video_path: str, threshold: float = 0.30,
-                     sample_fps: float = 3.0, max_dim: int = 128) -> List[dict]:
+
+def _detect_shots_av(
+    video_path: str,
+    threshold: float = 0.30,
+    sample_fps: float = 3.0,
+    max_dim: int = 128,
+) -> List[dict]:
     """Lightweight shot detection with PyAV + numpy (no OpenCV).
 
     Samples ~`sample_fps` downscaled grayscale frames and marks a cut when the
@@ -60,14 +65,18 @@ def _detect_shots_av(video_path: str, threshold: float = 0.30,
                 if float(np.mean(np.abs(small - prev))) > threshold:
                     cuts.append(t)
             prev = small
-        duration = (float(stream.duration * tb)
-                    if stream.duration else last_t) or last_t
+        duration = (
+            float(stream.duration * tb) if stream.duration else last_t
+        ) or last_t
     finally:
         container.close()
 
     bounds = sorted(set(cuts + [duration]))
-    windows = [{"start_sec": round(s, 2), "end_sec": round(e, 2)}
-               for s, e in zip(bounds, bounds[1:]) if e - s > 0.1]
+    windows = [
+        {"start_sec": round(s, 2), "end_sec": round(e, 2)}
+        for s, e in zip(bounds, bounds[1:], strict=False)
+        if e - s > 0.1
+    ]
     return windows or [{"start_sec": 0.0, "end_sec": round(duration, 2)}]
 
 
@@ -78,7 +87,7 @@ def detect_shots(video_path: str, threshold: float = 27.0) -> List[dict]:
     backend is usable, so the caller can fall back to uniform windows / fixtures.
     """
     try:
-        from scenedetect import detect, ContentDetector  # type: ignore
+        from scenedetect import ContentDetector, detect  # type: ignore
 
         def _secs(tc):  # `.seconds` (newer scenedetect) else get_seconds()
             return tc.seconds if hasattr(tc, "seconds") else tc.get_seconds()
@@ -91,30 +100,43 @@ def detect_shots(video_path: str, threshold: float = 27.0) -> List[dict]:
     try:
         return _detect_shots_av(video_path)
     except Exception as exc:
-        raise RuntimeError(f"shot detection unavailable (scenedetect/av): {exc!r}")
+        raise RuntimeError(
+            f"shot detection unavailable (scenedetect/av): {exc!r}"
+        ) from exc
 
 
-def uniform_windows(duration_sec: float, window: float = 8.0,
-                    stride: float = 8.0) -> List[dict]:
+def uniform_windows(
+    duration_sec: float, window: float = 8.0, stride: float = 8.0
+) -> List[dict]:
     """Fallback segmentation: fixed windows across the whole video."""
     out, t = [], 0.0
     while t < duration_sec:
-        out.append({"start_sec": round(t, 2),
-                    "end_sec": round(min(t + window, duration_sec), 2)})
+        out.append(
+            {
+                "start_sec": round(t, 2),
+                "end_sec": round(min(t + window, duration_sec), 2),
+            }
+        )
         t += stride
     return out
 
 
-def windows_to_segments(windows: List[dict], *, prefix: str = "seg",
-                        likelihood: float = 0.5,
-                        reason: str = "candidate reused footage") -> List[dict]:
+def windows_to_segments(
+    windows: List[dict],
+    *,
+    prefix: str = "seg",
+    likelihood: float = 0.5,
+    reason: str = "candidate reused footage",
+) -> List[dict]:
     """Turn {start_sec,end_sec} windows into SourceSegment-shaped dicts."""
     return [
-        {"segment_id": f"{prefix}_{i:03d}",
-         "start_sec": round(float(w["start_sec"]), 2),
-         "end_sec": round(float(w["end_sec"]), 2),
-         "source_likelihood": likelihood,
-         "reason": reason}
+        {
+            "segment_id": f"{prefix}_{i:03d}",
+            "start_sec": round(float(w["start_sec"]), 2),
+            "end_sec": round(float(w["end_sec"]), 2),
+            "source_likelihood": likelihood,
+            "reason": reason,
+        }
         for i, w in enumerate(windows, 1)
     ]
 
@@ -124,15 +146,28 @@ def windows_to_segments(windows: List[dict], *, prefix: str = "seg",
 # real match without a video: seg_001's phash matches the cached cand_demo_1
 # candidate (-> strong); seg_002's does not (-> stays low, showing discrimination).
 DEMO_SEGMENTS = [
-    {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
-     "source_likelihood": 0.81, "reason": "candidate reused footage",
-     "phashes": ["c3e1c3e1c3e1c3e1"], "ocr_text": "LIVE FROM DEMO",
-     "visible_handles": ["@demo_channel"],
-     "context_terms": ["demo", "street", "crowd"]},
-    {"segment_id": "seg_002", "start_sec": 58.2, "end_sec": 67.0,
-     "source_likelihood": 0.64, "reason": "candidate reused footage",
-     "phashes": ["5a5a5a5a5a5a5a5a"], "ocr_text": "",
-     "visible_handles": [], "context_terms": []},
+    {
+        "segment_id": "seg_001",
+        "start_sec": 12.0,
+        "end_sec": 24.5,
+        "source_likelihood": 0.81,
+        "reason": "candidate reused footage",
+        "phashes": ["c3e1c3e1c3e1c3e1"],
+        "ocr_text": "LIVE FROM DEMO",
+        "visible_handles": ["@demo_channel"],
+        "context_terms": ["demo", "street", "crowd"],
+    },
+    {
+        "segment_id": "seg_002",
+        "start_sec": 58.2,
+        "end_sec": 67.0,
+        "source_likelihood": 0.64,
+        "reason": "candidate reused footage",
+        "phashes": ["5a5a5a5a5a5a5a5a"],
+        "ocr_text": "",
+        "visible_handles": [],
+        "context_terms": [],
+    },
 ]
 
 
@@ -143,9 +178,12 @@ def demo_segments() -> List[dict]:
 
 # ── Keyframe extraction (returns RGB uint8 ndarrays from either backend) ────────
 
-def _extract_keyframes_cv2(video_path: str, start_sec: float, end_sec: float,
-                           n: int) -> List["object"]:
+
+def _extract_keyframes_cv2(
+    video_path: str, start_sec: float, end_sec: float, n: int
+) -> List["object"]:
     import cv2  # type: ignore
+
     cap = cv2.VideoCapture(video_path)
     try:
         frames = []
@@ -160,9 +198,11 @@ def _extract_keyframes_cv2(video_path: str, start_sec: float, end_sec: float,
         cap.release()
 
 
-def _extract_keyframes_av(video_path: str, start_sec: float, end_sec: float,
-                          n: int) -> List["object"]:
+def _extract_keyframes_av(
+    video_path: str, start_sec: float, end_sec: float, n: int
+) -> List["object"]:
     import av  # type: ignore
+
     frames: List[object] = []
     container = av.open(video_path)
     try:
@@ -188,8 +228,9 @@ def _extract_keyframes_av(video_path: str, start_sec: float, end_sec: float,
         container.close()
 
 
-def extract_keyframes(video_path: str, start_sec: float, end_sec: float,
-                      n: int = 3) -> List["object"]:
+def extract_keyframes(
+    video_path: str, start_sec: float, end_sec: float, n: int = 3
+) -> List["object"]:
     """Up to n evenly spaced frames in [start_sec, end_sec] as RGB uint8 ndarrays.
 
     Tries OpenCV, then PyAV. Raises RuntimeError if neither decoder is available.
@@ -198,17 +239,20 @@ def extract_keyframes(video_path: str, start_sec: float, end_sec: float,
         return []
     try:
         import cv2  # type: ignore  # noqa: F401
+
         return _extract_keyframes_cv2(video_path, start_sec, end_sec, n)
     except Exception:
         pass
     try:
         import av  # type: ignore  # noqa: F401
+
         return _extract_keyframes_av(video_path, start_sec, end_sec, n)
     except Exception as exc:
-        raise RuntimeError(f"no video decoder available (opencv/av): {exc!r}")
+        raise RuntimeError(f"no video decoder available (opencv/av): {exc!r}") from exc
 
 
 # ── Perceptual hashing (Pillow + imagehash + numpy only — no OpenCV) ────────────
+
 
 def phash_of_frame(frame, hash_size: int = 8) -> Optional[str]:
     """Perceptual hash (hex) of an RGB uint8 frame, or None if libs missing."""
@@ -230,5 +274,5 @@ def center_crop_phash(frame, hash_size: int = 8, crop: float = 0.6) -> Optional[
     h, w = frame.shape[:2]
     ch, cw = int(h * crop), int(w * crop)
     y0, x0 = (h - ch) // 2, (w - cw) // 2
-    cropped = frame[y0:y0 + ch, x0:x0 + cw]
+    cropped = frame[y0 : y0 + ch, x0 : x0 + cw]
     return str(imagehash.phash(Image.fromarray(cropped), hash_size=hash_size))

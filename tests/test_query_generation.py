@@ -1,11 +1,16 @@
 from clip2trace.telegram_search import (
-    generate_queries, extract_handles, extract_hashtags,
+    extract_handles,
+    extract_hashtags,
+    generate_queries,
 )
 
 
 def test_handles_extracted_and_prioritised_first():
-    clues = {"visible_handles": ["demo_channel"], "ocr_text": "Some overlay text",
-             "context_terms": ["protest"]}
+    clues = {
+        "visible_handles": ["demo_channel"],
+        "ocr_text": "Some overlay text",
+        "context_terms": ["protest"],
+    }
     qs = generate_queries(clues)
     assert qs[0]["query_type"] == "handle"
     assert qs[0]["query"] == "@demo_channel"
@@ -13,8 +18,12 @@ def test_handles_extracted_and_prioritised_first():
 
 
 def test_priority_ordering_is_sorted():
-    clues = {"visible_handles": ["a_channel"], "ocr_text": "live overlay",
-             "context_terms": ["square"], "caption": "see #breaking now"}
+    clues = {
+        "visible_handles": ["a_channel"],
+        "ocr_text": "live overlay",
+        "context_terms": ["square"],
+        "caption": "see #breaking now",
+    }
     qs = generate_queries(clues)
     priorities = [q["priority"] for q in qs]
     assert priorities == sorted(priorities)

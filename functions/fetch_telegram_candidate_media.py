@@ -9,6 +9,7 @@ def handler(input_data, context):
     dry_run = input_data.get("dry_run", True)
     try:
         from clip2trace.telegram_media import fetch_candidate_media
+
         result = fetch_candidate_media(candidates, dry_run=dry_run, live_client=None)
         return result
     except Exception:
@@ -18,8 +19,13 @@ def handler(input_data, context):
             url = c.get("url")
             if not url and ch and mid:
                 url = f"https://t.me/{str(ch).lstrip('@')}/{mid}"
-            out.append({"candidate_id": c.get("candidate_id", "cand_unknown"),
-                        "url": url, "caption": c.get("caption", ""),
-                        "has_media": bool(c.get("has_media")),
-                        "accessible": c.get("accessible", True)})
+            out.append(
+                {
+                    "candidate_id": c.get("candidate_id", "cand_unknown"),
+                    "url": url,
+                    "caption": c.get("caption", ""),
+                    "has_media": bool(c.get("has_media")),
+                    "accessible": c.get("accessible", True),
+                }
+            )
         return {"status": "metadata_only", "candidates": out, "downloaded": 0}

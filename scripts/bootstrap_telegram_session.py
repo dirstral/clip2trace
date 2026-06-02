@@ -27,18 +27,25 @@ def main() -> int:
     api_id = os.environ.get("TELEGRAM_API_ID")
     api_hash = os.environ.get("TELEGRAM_API_HASH")
     if not api_id or not api_hash:
-        print("ERROR: set TELEGRAM_API_ID and TELEGRAM_API_HASH env vars first.",
-              file=sys.stderr)
-        print("Get them from https://my.telegram.org -> API development tools.",
-              file=sys.stderr)
+        print(
+            "ERROR: set TELEGRAM_API_ID and TELEGRAM_API_HASH env vars first.",
+            file=sys.stderr,
+        )
+        print(
+            "Get them from https://my.telegram.org -> API development tools.",
+            file=sys.stderr,
+        )
         return 2
 
     try:
-        from telethon.sync import TelegramClient
         from telethon.sessions import StringSession
+        from telethon.sync import TelegramClient
     except Exception as exc:  # pragma: no cover
-        print(f"ERROR: telethon not installed ({exc!r}). "
-              "Install with: uv pip install telethon", file=sys.stderr)
+        print(
+            f"ERROR: telethon not installed ({exc!r}). "
+            "Install with: uv pip install telethon",
+            file=sys.stderr,
+        )
         return 3
 
     print("Starting interactive login (you'll be asked for phone + code)...")
@@ -48,8 +55,10 @@ def main() -> int:
     print("\n=== TELEGRAM_SESSION_STRING (store as a Sinas secret; DO NOT COMMIT) ===")
     print(session_string)
     print("=== end ===")
-    print("\nNext: set it as a Sinas secret (TELEGRAM_SESSION_STRING) and enable "
-          "ENABLE_TELEGRAM_LIVE_SEARCH=true on the clip2trace package.")
+    print(
+        "\nNext: set it as a Sinas secret (TELEGRAM_SESSION_STRING) and enable "
+        "ENABLE_TELEGRAM_LIVE_SEARCH=true on the clip2trace package."
+    )
     return 0
 
 

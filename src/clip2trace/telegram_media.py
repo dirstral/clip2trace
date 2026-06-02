@@ -7,7 +7,7 @@ opt-in, bounded, and only happen on the live path with a Telethon client.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 def normalise_candidate(raw: Dict) -> Dict:
@@ -21,8 +21,11 @@ def normalise_candidate(raw: Dict) -> Dict:
     if not url and channel and msg_id:
         url = f"https://t.me/{str(channel).lstrip('@')}/{msg_id}"
     return {
-        "candidate_id": raw.get("candidate_id")
-        or f"{channel}_{msg_id}" if channel and msg_id else raw.get("candidate_id", "cand_unknown"),
+        "candidate_id": (
+            raw.get("candidate_id") or f"{channel}_{msg_id}"
+            if channel and msg_id
+            else raw.get("candidate_id", "cand_unknown")
+        ),
         "channel": channel,
         "message_id": msg_id,
         "url": url,
@@ -37,9 +40,14 @@ def normalise_candidate(raw: Dict) -> Dict:
     }
 
 
-def fetch_candidate_media(candidates: List[Dict], *, dry_run: bool = True,
-                          live_client=None, max_media: int = 5,
-                          max_bytes: int = 8_000_000) -> Dict:
+def fetch_candidate_media(
+    candidates: List[Dict],
+    *,
+    dry_run: bool = True,
+    live_client=None,
+    max_media: int = 5,
+    max_bytes: int = 8_000_000,
+) -> Dict:
     """Fetch metadata for candidates; optionally download bounded media.
 
     In dry_run (default) we only normalise metadata. On a live download we cap
@@ -52,8 +60,12 @@ def fetch_candidate_media(candidates: List[Dict], *, dry_run: bool = True,
     if dry_run or live_client is None:
         if not dry_run and live_client is None:
             diagnostics.append("media download skipped: no live client available.")
-        return {"status": "metadata_only", "candidates": normalised,
-                "downloaded": 0, "diagnostics": diagnostics}
+        return {
+            "status": "metadata_only",
+            "candidates": normalised,
+            "downloaded": 0,
+            "diagnostics": diagnostics,
+        }
 
     downloaded = 0
     for cand in normalised[:max_media]:
@@ -66,5 +78,9 @@ def fetch_candidate_media(candidates: List[Dict], *, dry_run: bool = True,
         except Exception as exc:
             cand["accessible"] = False
             diagnostics.append(f"download failed for {cand['candidate_id']}: {exc!r}")
-    return {"status": "ok", "candidates": normalised,
-            "downloaded": downloaded, "diagnostics": diagnostics}
+    return {
+        "status": "ok",
+        "candidates": normalised,
+        "downloaded": downloaded,
+        "diagnostics": diagnostics,
+    }

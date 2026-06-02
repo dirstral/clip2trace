@@ -17,7 +17,7 @@ of candidate dicts (the `TelegramCandidate` shape in docs/data-model.md).
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 # Conservative defaults — we are a courteous client on a risky API.
 MAX_RESULTS_PER_QUERY = 50
@@ -62,23 +62,23 @@ def _peer_channel_id(peer_id) -> Optional[int]:
     return getattr(peer_id, "channel_id", None) or getattr(peer_id, "chat_id", None)
 
 
-def normalize_message(msg, chats_by_id: Dict[int, object],
-                      source_query: Optional[str] = None) -> Dict:
+def normalize_message(
+    msg, chats_by_id: Dict[int, object], source_query: Optional[str] = None
+) -> Dict:
     """Normalise a raw Telethon message + chat index into a candidate dict.
 
     Tolerant of missing attributes; never raises on a malformed message.
     """
     mid = getattr(msg, "id", None)
-    chan = chats_by_id.get(_peer_channel_id(getattr(msg, "peer_id", None)))
+    cid = _peer_channel_id(getattr(msg, "peer_id", None))
+    chan = chats_by_id.get(cid) if cid is not None else None
     username = getattr(chan, "username", None) if chan is not None else None
     title = getattr(chan, "title", None) if chan is not None else None
 
     url = f"https://t.me/{username}/{mid}" if username and mid else None
     date = getattr(msg, "date", None)
-    if hasattr(date, "isoformat"):
-        posted = date.isoformat()
-    else:
-        posted = str(date) if date else None
+    isoformat = getattr(date, "isoformat", None)
+    posted = isoformat() if callable(isoformat) else (str(date) if date else None)
 
     return {
         "candidate_id": f"{username or title or 'unknown'}_{mid}",
@@ -94,8 +94,9 @@ def normalize_message(msg, chats_by_id: Dict[int, object],
     }
 
 
-def accumulate(pages: Iterable[List[Dict]], max_results: int = MAX_RESULTS_PER_QUERY
-               ) -> List[Dict]:
+def accumulate(
+    pages: Iterable[List[Dict]], max_results: int = MAX_RESULTS_PER_QUERY
+) -> List[Dict]:
     """Flatten paginated candidate lists, de-dupe by candidate_id, cap at
     `max_results`. `pages` is any iterable of candidate-dict lists."""
     seen, out = set(), []
@@ -120,9 +121,15 @@ class TelethonSearchClient:
     free-text search once free slots are exhausted (default False).
     """
 
-    def __init__(self, connector: Callable[[], object], *, allow_paid: bool = False,
-                 max_results_per_query: int = MAX_RESULTS_PER_QUERY,
-                 max_pages: int = MAX_PAGES_PER_QUERY, page_limit: int = PAGE_LIMIT):
+    def __init__(
+        self,
+        connector: Callable[[], Any],
+        *,
+        allow_paid: bool = False,
+        max_results_per_query: int = MAX_RESULTS_PER_QUERY,
+        max_pages: int = MAX_PAGES_PER_QUERY,
+        page_limit: int = PAGE_LIMIT,
+    ):
         self._connector = connector
         self.allow_paid = allow_paid
         self.max_results_per_query = max_results_per_query
@@ -145,17 +152,23 @@ class TelethonSearchClient:
                 if is_free_text(hashtag, free_text) and not self._free_text_ok(client):
                     self.diagnostics.append(
                         f"skipped metered free-text query {free_text!r}: "
-                        "no free slots and paid search not authorised")
+                        "no free slots and paid search not authorised"
+                    )
                     continue
                 try:
                     # Materialise inside the try so pagination errors (the
                     # generator raises while iterating) are caught here.
-                    pages = list(self._paginate(client, functions, types,
-                                                hashtag, free_text, q.get("query")))
+                    pages = list(
+                        self._paginate(
+                            client, functions, types, hashtag, free_text, q.get("query")
+                        )
+                    )
                     candidates = accumulate(pages, self.max_results_per_query)
                 except FloodWaitError as exc:
-                    self.diagnostics.append(f"flood wait {getattr(exc, 'seconds', '?')}s; "
-                                            "stopping live search")
+                    self.diagnostics.append(
+                        f"flood wait {getattr(exc, 'seconds', '?')}s; "
+                        "stopping live search"
+                    )
                     break
                 except Exception as exc:  # never crash the pipeline
                     self.diagnostics.append(f"query failed {q.get('query')!r}: {exc!r}")
@@ -173,6 +186,7 @@ class TelethonSearchClient:
             return True
         try:
             from telethon import functions
+
             flood = client(functions.channels.CheckSearchPostsFloodRequest())
             remaining = getattr(flood, "remaining", None)
             # If we can't read it, be conservative and allow one attempt.
@@ -180,16 +194,19 @@ class TelethonSearchClient:
         except Exception:
             return True
 
-    def _paginate(self, client, functions, types,
-                  hashtag, free_text, source_query):
+    def _paginate(self, client, functions, types, hashtag, free_text, source_query):
         """Yield candidate-dict pages, following `next_rate`."""
         offset_rate, offset_id = 0, 0
         offset_peer = types.InputPeerEmpty()
         for _ in range(self.max_pages):
             req = functions.channels.SearchPostsRequest(
-                hashtag=hashtag, query=free_text,
-                offset_rate=offset_rate, offset_peer=offset_peer,
-                offset_id=offset_id, limit=self.page_limit)
+                hashtag=hashtag,
+                query=free_text,
+                offset_rate=offset_rate,
+                offset_peer=offset_peer,
+                offset_id=offset_id,
+                limit=self.page_limit,
+            )
             res = client(req)
             msgs = list(getattr(res, "messages", []) or [])
             if not msgs:
@@ -203,8 +220,9 @@ class TelethonSearchClient:
             offset_id = getattr(msgs[-1], "id", 0) or 0
 
 
-def build_client_from_secrets(secrets: Optional[Dict], *, allow_paid: bool = False
-                              ) -> Optional["TelethonSearchClient"]:
+def build_client_from_secrets(
+    secrets: Optional[Dict], *, allow_paid: bool = False
+) -> Optional["TelethonSearchClient"]:
     """Build a live client from Sinas secrets, or return None if unavailable.
 
     Returns None (never raises) when Telethon is missing or any of
@@ -219,13 +237,13 @@ def build_client_from_secrets(secrets: Optional[Dict], *, allow_paid: bool = Fal
         return None
     try:
         from telethon.sync import TelegramClient  # noqa: F401  (sync wrapper)
-        from telethon.sessions import StringSession
     except Exception:
         return None
 
     def connector():
-        from telethon.sync import TelegramClient
         from telethon.sessions import StringSession
+        from telethon.sync import TelegramClient
+
         return TelegramClient(StringSession(session), int(api_id), api_hash)
 
     return TelethonSearchClient(connector, allow_paid=allow_paid)

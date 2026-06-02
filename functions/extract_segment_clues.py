@@ -22,8 +22,20 @@ _HANDLE_RE = re.compile(r"@([A-Za-z][A-Za-z0-9_]{3,31})")
 _HASHTAG_RE = re.compile(r"#(\w{2,64})")
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{2,}")
 _STOPWORDS = {
-    "the", "and", "for", "with", "this", "that", "from", "video", "live",
-    "breaking", "news", "watch", "today", "footage",
+    "the",
+    "and",
+    "for",
+    "with",
+    "this",
+    "that",
+    "from",
+    "video",
+    "live",
+    "breaking",
+    "news",
+    "watch",
+    "today",
+    "footage",
 }
 
 
@@ -46,8 +58,12 @@ def handler(input_data, context):
     # --- #10 visual: extract keyframes -> perceptual hashes when possible. ---
     if video_path and start is not None and end is not None:
         try:
-            from clip2trace.video import (extract_keyframes, phash_of_frame,
-                                          center_crop_phash)
+            from clip2trace.video import (
+                center_crop_phash,
+                extract_keyframes,
+                phash_of_frame,
+            )
+
             frames = extract_keyframes(video_path, float(start), float(end))
             for frame in frames:
                 h = phash_of_frame(frame)
@@ -64,6 +80,7 @@ def handler(input_data, context):
     if not ocr_text and frames:
         try:
             from clip2trace.ocr import ocr_image
+
             got = ocr_image(frames[0], context=context)
             if got:
                 ocr_text = got
@@ -75,6 +92,7 @@ def handler(input_data, context):
     if not ocr_available:
         try:
             import importlib
+
             importlib.import_module("pytesseract")
             ocr_available = True
         except Exception:
@@ -82,8 +100,8 @@ def handler(input_data, context):
 
     blob = " ".join([text_hint, caption, ocr_text])
     try:
-        from clip2trace.telegram_search import (extract_handles,
-                                                derive_context_terms)
+        from clip2trace.telegram_search import derive_context_terms, extract_handles
+
         handles = extract_handles(blob)
         context_terms = derive_context_terms(blob)
     except Exception:

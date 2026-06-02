@@ -12,7 +12,7 @@ if SRC not in sys.path:
 
 np = pytest.importorskip("numpy")
 
-from clip2trace.ocr import ocr_image, claude_vision_ocr  # noqa: E402
+from clip2trace.ocr import claude_vision_ocr, ocr_image  # noqa: E402
 
 
 def _frame():
@@ -26,8 +26,9 @@ def test_claude_vision_request_shape_and_parse():
         captured.update(url=url, headers=headers, body=body)
         return {"choices": [{"message": {"content": "LIVE FROM DEMO"}}]}
 
-    out = claude_vision_ocr(_frame(), base_url="https://via-10", token="tok",
-                            post=fake_post)
+    out = claude_vision_ocr(
+        _frame(), base_url="https://via-10", token="tok", post=fake_post
+    )
     assert out == "LIVE FROM DEMO"
     assert captured["url"].endswith("/adapters/openai/v1/chat/completions")
     assert captured["headers"]["Authorization"] == "Bearer tok"
@@ -44,8 +45,12 @@ def test_claude_vision_returns_none_without_runtime():
 
 def test_ocr_image_uses_claude_when_tesseract_blank():
     # blank frame → tesseract yields '' (or is absent) → Claude path is used
-    out = ocr_image(_frame(), base_url="https://via-10", token="tok",
-                    post=lambda u, h, b: {"choices": [{"message": {"content": "X"}}]})
+    out = ocr_image(
+        _frame(),
+        base_url="https://via-10",
+        token="tok",
+        post=lambda u, h, b: {"choices": [{"message": {"content": "X"}}]},
+    )
     assert out == "X"
 
 

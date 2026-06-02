@@ -18,15 +18,21 @@ MINIMAL_INPUT = {
     "create_job": {"mode": "demo"},
     "analyze_input_video": {"job_id": "job_x"},
     "detect_source_segments": {"job_id": "job_x"},
-    "extract_segment_clues": {"job_id": "job_x", "segment_id": "seg_001",
-                              "text_hint": "follow @demo_channel"},
+    "extract_segment_clues": {
+        "job_id": "job_x",
+        "segment_id": "seg_001",
+        "text_hint": "follow @demo_channel",
+    },
     "generate_telegram_queries": {"visible_handles": ["demo_channel"]},
     "search_global_telegram_posts": {"mode": "demo"},
     "fetch_telegram_candidate_media": {"candidates": []},
-    "verify_media_similarity": {"segment_phashes": ["c3e1"],
-                                "candidate_phashes": ["c3e1"]},
-    "rank_source_candidates": {"candidates": [
-        {"candidate_id": "c1", "evidence": {"visual_similarity": 0.9}}]},
+    "verify_media_similarity": {
+        "segment_phashes": ["c3e1"],
+        "candidate_phashes": ["c3e1"],
+    },
+    "rank_source_candidates": {
+        "candidates": [{"candidate_id": "c1", "evidence": {"visual_similarity": 0.9}}]
+    },
     "render_report": {"job_id": "job_x", "segments": [], "ranked_candidates": []},
     "diagnose_runtime": {},
 }
@@ -46,7 +52,8 @@ def test_inline_blocks_match_dev_copies():
     names = set(_inline_functions())
     assert names == DEV_COPY_FUNCTIONS, (
         f"inline/dev-copy drift: only inline={names - DEV_COPY_FUNCTIONS}, "
-        f"only dev={DEV_COPY_FUNCTIONS - names}")
+        f"only dev={DEV_COPY_FUNCTIONS - names}"
+    )
 
 
 @pytest.mark.parametrize("name,code", sorted(_inline_functions().items()))

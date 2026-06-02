@@ -24,10 +24,16 @@ def _load(name):
 
 def test_handles_and_context_terms_and_contract():
     mod = _load("extract_segment_clues")
-    out = mod.handler({"job_id": "j", "segment_id": "seg_001",
-                       "text_hint": "follow @demo_channel",
-                       "caption": "crowd gathers in city square #breaking",
-                       "ocr_text": "LIVE FROM DEMO"}, {})
+    out = mod.handler(
+        {
+            "job_id": "j",
+            "segment_id": "seg_001",
+            "text_hint": "follow @demo_channel",
+            "caption": "crowd gathers in city square #breaking",
+            "ocr_text": "LIVE FROM DEMO",
+        },
+        {},
+    )
     assert "demo_channel" in out["visible_handles"]
 
     terms = [t.lower() for t in out["context_terms"]]
@@ -38,16 +44,28 @@ def test_handles_and_context_terms_and_contract():
     assert "demo_channel" not in terms and "channel" not in terms
 
     # output validates against the SegmentClues seam contract (docs/data-model.md)
-    SegmentClues(**{k: out[k] for k in
-                    ("segment_id", "keyframe_file_ids", "phashes", "ocr_text",
-                     "visible_handles", "context_terms", "ocr_available")})
+    SegmentClues(
+        **{
+            k: out[k]
+            for k in (
+                "segment_id",
+                "keyframe_file_ids",
+                "phashes",
+                "ocr_text",
+                "visible_handles",
+                "context_terms",
+                "ocr_available",
+            )
+        }
+    )
     assert out["implemented"] is True
 
 
 def test_supplied_phashes_pass_through():
     mod = _load("extract_segment_clues")
-    out = mod.handler({"job_id": "j", "segment_id": "s",
-                       "phashes": ["c3e1c3e1c3e1c3e1"]}, {})
+    out = mod.handler(
+        {"job_id": "j", "segment_id": "s", "phashes": ["c3e1c3e1c3e1c3e1"]}, {}
+    )
     assert "c3e1c3e1c3e1c3e1" in out["phashes"]
 
 

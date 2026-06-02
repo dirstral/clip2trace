@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type-test:
+    name: lint · types · tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      # Each step resolves base + dev deps (cached). Optional extras
+      # (video/telegram) are intentionally not installed — those tests skip,
+      # matching the managed Sinas worker which is pip-only.
+      - name: Ruff (lint)
+        run: uv run --extra dev ruff check .
+
+      - name: Black (format check)
+        run: uv run --extra dev black --check src tests functions scripts
+
+      - name: Mypy (types)
+        run: uv run --extra dev mypy
+
+      - name: Pytest
+        run: uv run --extra dev pytest -q

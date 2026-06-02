@@ -12,16 +12,24 @@ from datetime import datetime, timezone
 import pytest
 
 from clip2trace.telegram_live import (
-    route_query, is_free_text, normalize_message, accumulate,
-    _index_chats, _peer_channel_id, build_client_from_secrets,
     TelethonSearchClient,
+    _index_chats,
+    _peer_channel_id,
+    accumulate,
+    build_client_from_secrets,
+    is_free_text,
+    normalize_message,
+    route_query,
 )
-
 
 # --------------------------- pure helpers ---------------------------
 
+
 def test_route_query_hashtag_by_type():
-    assert route_query({"query": "#breaking", "query_type": "hashtag"}) == ("breaking", None)
+    assert route_query({"query": "#breaking", "query_type": "hashtag"}) == (
+        "breaking",
+        None,
+    )
 
 
 def test_route_query_hashtag_by_prefix():
@@ -29,7 +37,10 @@ def test_route_query_hashtag_by_prefix():
 
 
 def test_route_query_free_text():
-    assert route_query({"query": "@demo_channel", "query_type": "handle"}) == (None, "@demo_channel")
+    assert route_query({"query": "@demo_channel", "query_type": "handle"}) == (
+        None,
+        "@demo_channel",
+    )
 
 
 def test_route_query_empty():
@@ -43,7 +54,8 @@ def test_is_free_text():
 
 def _msg(mid, channel_id=999, media=True, fwd=False, caption="hi"):
     return pytypes.SimpleNamespace(
-        id=mid, message=caption,
+        id=mid,
+        message=caption,
         date=datetime(2026, 5, 20, 8, 14, tzinfo=timezone.utc),
         peer_id=pytypes.SimpleNamespace(channel_id=channel_id),
         media=object() if media else None,
@@ -81,13 +93,20 @@ def test_peer_channel_id():
 
 
 def test_accumulate_dedup_and_budget():
-    pages = [[{"candidate_id": "a"}, {"candidate_id": "b"}],
-             [{"candidate_id": "b"}, {"candidate_id": "c"}]]
-    assert [c["candidate_id"] for c in accumulate(pages, max_results=10)] == ["a", "b", "c"]
+    pages = [
+        [{"candidate_id": "a"}, {"candidate_id": "b"}],
+        [{"candidate_id": "b"}, {"candidate_id": "c"}],
+    ]
+    assert [c["candidate_id"] for c in accumulate(pages, max_results=10)] == [
+        "a",
+        "b",
+        "c",
+    ]
     assert len(accumulate(pages, max_results=2)) == 2
 
 
 # --------------------------- build_client ---------------------------
+
 
 def test_build_client_none_without_secrets():
     assert build_client_from_secrets({}) is None
@@ -95,6 +114,7 @@ def test_build_client_none_without_secrets():
 
 
 # --------------------------- fake telethon glue ---------------------------
+
 
 class _FakeClient:
     """Context-manager client that answers flood + search requests from canned pages."""
@@ -127,6 +147,7 @@ class _FakeClient:
 @pytest.fixture
 def fake_telethon():
     """Inject a minimal fake `telethon` + `telethon.errors` for the glue."""
+
     class _Channels:
         def SearchPostsRequest(self, **kw):
             return ("search", kw)
@@ -159,12 +180,18 @@ def fake_telethon():
 
 def test_search_paginates_and_dedups(fake_telethon):
     chats = [_chat()]
-    pages = [([_msg(10), _msg(11)], chats, 5),
-             ([_msg(11), _msg(12)], chats, None)]  # 11 repeats -> deduped
+    pages = [
+        ([_msg(10), _msg(11)], chats, 5),
+        ([_msg(11), _msg(12)], chats, None),
+    ]  # 11 repeats -> deduped
     client = _FakeClient(pages)
     sc = TelethonSearchClient(lambda: client)
     cands = sc.search([{"query": "protest", "query_type": "context"}])
-    assert [c["candidate_id"] for c in cands] == ["demo_channel_10", "demo_channel_11", "demo_channel_12"]
+    assert [c["candidate_id"] for c in cands] == [
+        "demo_channel_10",
+        "demo_channel_11",
+        "demo_channel_12",
+    ]
     # free-text query routed to the `query` param, not `hashtag`
     assert client.calls[0]["query"] == "protest" and client.calls[0]["hashtag"] is None
 
@@ -206,8 +233,11 @@ def test_search_handles_flood_wait(fake_telethon):
 import importlib.util  # noqa: E402
 import os  # noqa: E402
 
-_FUNC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "functions", "search_global_telegram_posts.py")
+_FUNC = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "functions",
+    "search_global_telegram_posts.py",
+)
 
 
 def _load_handler():

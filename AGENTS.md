@@ -41,9 +41,21 @@ This project uses **uv** for Python — do not use bare `pip`/`venv`.
 uv venv
 uv pip install -e ".[dev]"              # core + pytest
 uv pip install -e ".[video,telegram]"   # optional: opencv/scenedetect/telethon
-uv run --with pytest pytest -q          # run the suite (24 tests, must stay green)
+uv run --extra dev pytest -q            # run the suite (must stay green)
 uv run python scripts/make_demo_fixture.py --check   # validate demo fixtures
 ```
+
+Lint / format / type-check (same gates CI enforces — config in `pyproject.toml`):
+
+```bash
+uv run --extra dev ruff check .                              # lint (ruff)
+uv run --extra dev black src tests functions scripts         # format (black, 88 cols)
+uv run --extra dev mypy                                       # type-check src/clip2trace
+```
+
+CI (`.github/workflows/ci.yml`) runs ruff + black `--check` + mypy + pytest on every
+PR to `main`. Optional: `uvx pre-commit install` for the local hooks in
+`.pre-commit-config.yaml`.
 
 ## Sinas commands
 
@@ -143,7 +155,8 @@ Issues live in `dirstral/clip2trace` (GitHub). Canonical issue source is
 
 ## Pre-commit checklist
 
-- [ ] `uv run --with pytest pytest -q` is green
+- [ ] `uv run --extra dev pytest -q` is green
+- [ ] `ruff check .`, `black --check`, and `mypy` pass (CI enforces all three)
 - [ ] No capitalised spelling of the name anywhere
 - [ ] No secrets/media staged (`git status` clean of `.env`, sessions, video)
 - [ ] No invented Sinas YAML fields; `sinas validate` re-run if the package changed
