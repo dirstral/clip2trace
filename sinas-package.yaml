@@ -202,12 +202,17 @@ spec:
           mode: { type: string, default: demo }
         required: [job_id]
       code: |
-        def _stage_input_video(file_id, context):
+        def _stage_input_video(file_id, context, cache_key=None):
             # Download an uploaded clip2trace/input-videos file to /tmp so PyAV can
             # decode it. The runtime base URL is the sinas SDK default
             # (host.docker.internal:8000), NOT in env/context — see
             # docs/research/runtime-diagnostics.md. Bounded to ~90 MB (100 MB /tmp).
             import os, base64, tempfile
+            def _safe_cache_part(value):
+                text = str(value or "")
+                cleaned = "".join(
+                    ch if ch.isalnum() or ch in "._-" else "_" for ch in text)
+                return cleaned.strip("._") or "scope"
             context = context or {}
             token = context.get("access_token")
             if not file_id or not token:
@@ -221,11 +226,23 @@ spec:
             url = "%s/files/clip2trace/input-videos/%s" % (
                 base, quote(str(file_id), safe=""))
             name = os.path.basename(str(file_id))
-            path = os.path.join(tempfile.gettempdir(),
-                                name if "." in name else name + ".mp4")
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                return path  # reuse already-staged copy (no per-segment re-download)
             cap = 90 * 1024 * 1024
+            path = os.path.join(
+                tempfile.gettempdir(),
+                "clip2trace",
+                "input-videos",
+                "user_" + _safe_cache_part(context.get("user_id")),
+                "job_" + _safe_cache_part(cache_key),
+                name if "." in name else name + ".mp4")
+            try:
+                if os.path.exists(path) and not os.path.isfile(path):
+                    return None
+                if os.path.isfile(path):
+                    size = os.path.getsize(path)
+                    if 0 < size <= cap:
+                        return path  # reuse already-staged copy within this job
+            except OSError:
+                pass
             try:
                 import requests
                 resp = requests.get(
@@ -239,6 +256,7 @@ spec:
                 raw = base64.b64decode(b64)
                 if len(raw) > cap:
                     return None
+                os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "wb") as fh:
                     fh.write(raw)
                 return path
@@ -257,7 +275,7 @@ spec:
 
             file_id = input_data.get("input_video_file_id")
             if not video_path and file_id:
-                video_path = _stage_input_video(file_id, context)
+                video_path = _stage_input_video(file_id, context, job_id)
                 diagnostics.append(
                     ("staged input video %s" % file_id) if video_path
                     else ("input video %s could not be staged" % file_id))
@@ -372,10 +390,15 @@ spec:
           duration_sec: { type: number }
         required: [job_id]
       code: |
-        def _stage_input_video(file_id, context):
+        def _stage_input_video(file_id, context, cache_key=None):
             # Download an uploaded clip2trace/input-videos file to /tmp for decode.
             # Base URL = sinas SDK default (not in env/context); bounded ~90 MB.
             import os, base64, tempfile
+            def _safe_cache_part(value):
+                text = str(value or "")
+                cleaned = "".join(
+                    ch if ch.isalnum() or ch in "._-" else "_" for ch in text)
+                return cleaned.strip("._") or "scope"
             context = context or {}
             token = context.get("access_token")
             if not file_id or not token:
@@ -389,11 +412,23 @@ spec:
             url = "%s/files/clip2trace/input-videos/%s" % (
                 base, quote(str(file_id), safe=""))
             name = os.path.basename(str(file_id))
-            path = os.path.join(tempfile.gettempdir(),
-                                name if "." in name else name + ".mp4")
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                return path  # reuse already-staged copy (no per-segment re-download)
             cap = 90 * 1024 * 1024
+            path = os.path.join(
+                tempfile.gettempdir(),
+                "clip2trace",
+                "input-videos",
+                "user_" + _safe_cache_part(context.get("user_id")),
+                "job_" + _safe_cache_part(cache_key),
+                name if "." in name else name + ".mp4")
+            try:
+                if os.path.exists(path) and not os.path.isfile(path):
+                    return None
+                if os.path.isfile(path):
+                    size = os.path.getsize(path)
+                    if 0 < size <= cap:
+                        return path  # reuse already-staged copy within this job
+            except OSError:
+                pass
             try:
                 import requests
                 resp = requests.get(
@@ -407,6 +442,7 @@ spec:
                 raw = base64.b64decode(b64)
                 if len(raw) > cap:
                     return None
+                os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "wb") as fh:
                     fh.write(raw)
                 return path
@@ -422,7 +458,7 @@ spec:
 
             file_id = input_data.get("input_video_file_id")
             if not video_path and file_id:
-                video_path = _stage_input_video(file_id, context)
+                video_path = _stage_input_video(file_id, context, input_data.get("job_id"))
                 diagnostics.append(
                     ("staged input video %s" % file_id) if video_path
                     else ("input video %s could not be staged" % file_id))
@@ -541,10 +577,15 @@ spec:
           keyframe_file_ids: { type: array, items: { type: string } }
         required: [job_id, segment_id]
       code: |
-        def _stage_input_video(file_id, context):
+        def _stage_input_video(file_id, context, cache_key=None):
             # Download an uploaded clip2trace/input-videos file to /tmp for keyframe
             # extraction. Base URL = sinas SDK default (not in env/context); ~90 MB cap.
             import os, base64, tempfile
+            def _safe_cache_part(value):
+                text = str(value or "")
+                cleaned = "".join(
+                    ch if ch.isalnum() or ch in "._-" else "_" for ch in text)
+                return cleaned.strip("._") or "scope"
             context = context or {}
             token = context.get("access_token")
             if not file_id or not token:
@@ -558,11 +599,23 @@ spec:
             url = "%s/files/clip2trace/input-videos/%s" % (
                 base, quote(str(file_id), safe=""))
             name = os.path.basename(str(file_id))
-            path = os.path.join(tempfile.gettempdir(),
-                                name if "." in name else name + ".mp4")
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                return path  # reuse already-staged copy (no per-segment re-download)
             cap = 90 * 1024 * 1024
+            path = os.path.join(
+                tempfile.gettempdir(),
+                "clip2trace",
+                "input-videos",
+                "user_" + _safe_cache_part(context.get("user_id")),
+                "job_" + _safe_cache_part(cache_key),
+                name if "." in name else name + ".mp4")
+            try:
+                if os.path.exists(path) and not os.path.isfile(path):
+                    return None
+                if os.path.isfile(path):
+                    size = os.path.getsize(path)
+                    if 0 < size <= cap:
+                        return path  # reuse already-staged copy within this job
+            except OSError:
+                pass
             try:
                 import requests
                 resp = requests.get(
@@ -576,6 +629,7 @@ spec:
                 raw = base64.b64decode(b64)
                 if len(raw) > cap:
                     return None
+                os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "wb") as fh:
                     fh.write(raw)
                 return path
@@ -603,7 +657,7 @@ spec:
 
             file_id = input_data.get("input_video_file_id")
             if not video_path and file_id:
-                video_path = _stage_input_video(file_id, context)
+                video_path = _stage_input_video(file_id, context, input_data.get("job_id"))
                 diagnostics.append(
                     ("staged input video %s" % file_id) if video_path
                     else ("input video %s could not be staged" % file_id))
