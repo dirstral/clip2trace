@@ -7,7 +7,7 @@ human verification and always carries caveats. See skills/report-style.md.
 from __future__ import annotations
 
 import html as _html
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 BANNED_PHRASES = (
     "the original",
@@ -55,7 +55,7 @@ def build_report(
     *,
     mode: str = "demo",
     summary: str = "",
-    clusters: List[Dict] = None,
+    clusters: Optional[List[Dict]] = None,
 ) -> Dict:
     """Assemble the report JSON dict (schemas.ProvenanceReport shape).
 
