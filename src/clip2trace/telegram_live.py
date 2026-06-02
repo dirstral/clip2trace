@@ -24,6 +24,26 @@ MAX_RESULTS_PER_QUERY = 50
 MAX_PAGES_PER_QUERY = 5
 PAGE_LIMIT = 100
 
+# Media download bounds (Sinas containers: 100 MB /tmp, 512 MB RAM, 300 s).
+MAX_MEDIA = 5
+MAX_MEDIA_BYTES = 8_000_000          # per-file cap
+MAX_TMP_BUDGET = 80_000_000          # total bytes across a fetch (under 100 MB /tmp)
+
+# Telethon error class names that mean "this media is inaccessible — skip it".
+# Matched by class name so we don't hard-import telethon here.
+INACCESSIBLE_ERROR_NAMES = frozenset({
+    "ChannelPrivateError", "ChannelInvalidError", "MsgIdInvalidError",
+    "MediaEmptyError", "FileIdInvalidError", "LocationInvalidError",
+    "UsernameInvalidError", "UsernameNotOccupiedError",
+})
+
+
+def media_within_cap(size, max_bytes: int = MAX_MEDIA_BYTES) -> bool:
+    """Pre-download size gate. Unknown size (None, common for photos) is allowed
+    through — the per-file cap can't pre-judge it, so we let the download proceed
+    and rely on the total-/tmp budget. A known size over the cap is rejected."""
+    return size is None or size <= max_bytes
+
 
 def route_query(query: Dict) -> Tuple[Optional[str], Optional[str]]:
     """Map a query dict to `(hashtag, free_text)` — exactly one is non-None.
@@ -179,6 +199,65 @@ class TelethonSearchClient:
                     seen.add(cand["candidate_id"])
                     results.append(cand)
         return results
+
+    def download_candidates(self, candidates: List[Dict], *,
+                            max_media: int = MAX_MEDIA,
+                            max_bytes: int = MAX_MEDIA_BYTES,
+                            total_budget: int = MAX_TMP_BUDGET,
+                            dest_dir: str = "/tmp") -> Dict:
+        """Download bounded media for candidates over a single connection.
+
+        Caps per-file size (`max_bytes`), item count (`max_media`) and the total
+        bytes written (`total_budget`, to respect the 100 MB /tmp limit). Sets
+        `media_file_id` on success; marks `accessible = False` on inaccessible/
+        deleted/private media. Returns
+        {"candidates", "downloaded", "diagnostics"}. Never raises.
+        """
+        from telethon.errors import FloodWaitError  # lazy
+
+        updated = [dict(c) for c in candidates]
+        downloaded, spent, diags = 0, 0, []
+        with self._connector() as client:
+            for cand in updated:
+                if downloaded >= max_media:
+                    break
+                if not cand.get("has_media") or not cand.get("accessible"):
+                    continue
+                channel, mid = cand.get("channel"), cand.get("message_id")
+                if not channel or not mid:
+                    continue
+                try:
+                    msg = client.get_messages(channel, ids=mid)
+                    if msg is None:
+                        cand["accessible"] = False
+                        diags.append(f"{channel}/{mid}: not found or deleted")
+                        continue
+                    size = getattr(getattr(msg, "file", None), "size", None)
+                    if not media_within_cap(size, max_bytes):
+                        diags.append(f"{channel}/{mid}: {size} bytes over per-file cap")
+                        continue
+                    if size and spent + size > total_budget:
+                        diags.append("tmp byte budget reached; stopping downloads")
+                        break
+                    path = client.download_media(msg, file=dest_dir)
+                    if path is None:
+                        cand["accessible"] = False
+                        diags.append(f"{channel}/{mid}: no downloadable media")
+                        continue
+                    cand["media_file_id"] = path
+                    downloaded += 1
+                    spent += size or 0
+                except FloodWaitError as exc:
+                    diags.append(f"flood wait {getattr(exc, 'seconds', '?')}s; "
+                                 "stopping downloads")
+                    break
+                except Exception as exc:
+                    cand["accessible"] = False
+                    name = type(exc).__name__
+                    reason = "inaccessible" if name in INACCESSIBLE_ERROR_NAMES else name
+                    diags.append(f"{channel}/{mid}: download failed ({reason})")
+        self.diagnostics.extend(diags)
+        return {"candidates": updated, "downloaded": downloaded, "diagnostics": diags}
 
     def _free_text_ok(self, client) -> bool:
         """Best-effort check of remaining free-text search slots."""
