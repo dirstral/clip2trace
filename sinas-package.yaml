@@ -577,6 +577,9 @@ spec:
           keyframe_file_ids: { type: array, items: { type: string } }
           segments: { type: array, items: { type: object } }
         required: [job_id]
+        anyOf:
+          - { required: [segment_id] }   # single mode
+          - { required: [segments] }     # batch mode
       code: |
         def _stage_input_video(file_id, context, cache_key=None):
             # Download an uploaded clip2trace/input-videos file to /tmp for keyframe
@@ -639,7 +642,18 @@ spec:
 
         def _clues_for_segment(seg, context, video_path, seed_diagnostics=None):
             # Compute the SegmentClues dict for one segment against an already
-            # staged video_path (shared across a batch); never stages here.
+            # staged video_path (shared across a batch); never stages here. A batch
+            # entry that is not a dict or lacks segment_id is a caller error: return
+            # a marker with implemented=False, not a clues dict with segment_id None.
+            if not isinstance(seg, dict) or not seg.get("segment_id"):
+                return {"segment_id": (seg.get("segment_id")
+                                       if isinstance(seg, dict) else None),
+                        "keyframe_file_ids": [], "phashes": [], "ocr_text": "",
+                        "visible_handles": [], "context_terms": [],
+                        "ocr_available": False,
+                        "diagnostics": list(seed_diagnostics or [])
+                        + ["segment requires a segment_id"],
+                        "implemented": False}
             import re
             HANDLE_RE = re.compile(r"@([A-Za-z][A-Za-z0-9_]{3,31})")
             HASHTAG_RE = re.compile(r"#(\w{2,64})")
@@ -803,10 +817,21 @@ spec:
             if not batch and not input_data.get("segment_id"):
                 return {"error": "job_id and segment_id are required"}
 
+            # Only stage if some segment actually needs the shared copy (has a
+            # keyframe window and no per-segment video_path), so a clues-only batch
+            # never triggers a whole-video download.
+            def _needs_shared_video(seg):
+                seg = seg if isinstance(seg, dict) else {}
+                return (seg.get("start_sec") is not None
+                        and seg.get("end_sec") is not None
+                        and not seg.get("video_path"))
+
             staging_diags = []
             video_path = input_data.get("video_path")
             file_id = input_data.get("input_video_file_id")
-            if not video_path and file_id:
+            work = segments if batch else [input_data]
+            if (not video_path and file_id
+                    and any(_needs_shared_video(s) for s in work)):
                 video_path = _stage_input_video(
                     file_id, context, input_data.get("job_id"))
                 staging_diags.append(
@@ -816,7 +841,9 @@ spec:
             if batch:
                 out_segments = [
                     _clues_for_segment(
-                        seg, context, (seg or {}).get("video_path") or video_path)
+                        seg, context,
+                        (seg.get("video_path") if isinstance(seg, dict) else None)
+                        or video_path)
                     for seg in segments]
                 return {"segments": out_segments, "diagnostics": staging_diags,
                         "implemented": True}

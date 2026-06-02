@@ -53,7 +53,24 @@ def _clues_for_segment(seg, context, video_path, seed_diagnostics=None):
     `video_path` is the already-staged local clip (shared across a batch); this
     helper never stages. `seed_diagnostics` prepends any job-level notes (e.g.
     staging messages) so single-mode output stays identical to before.
+
+    A batch entry that is not a dict or has no `segment_id` is a caller error:
+    return a marker with `implemented: False` rather than a SegmentClues dict with
+    `segment_id: None`, so downstream consumers never mistake it for real clues.
     """
+    if not isinstance(seg, dict) or not seg.get("segment_id"):
+        return {
+            "segment_id": seg.get("segment_id") if isinstance(seg, dict) else None,
+            "keyframe_file_ids": [],
+            "phashes": [],
+            "ocr_text": "",
+            "visible_handles": [],
+            "context_terms": [],
+            "ocr_available": False,
+            "diagnostics": list(seed_diagnostics or [])
+            + ["segment requires a segment_id"],
+            "implemented": False,
+        }
     seg = seg or {}
     text_hint = seg.get("text_hint", "") or ""
     caption = seg.get("caption", "") or ""
@@ -157,10 +174,21 @@ def handler(input_data, context):
     # per execution and reused across every segment (cache_key=job_id also lets
     # warm pooled workers reuse it across calls). The library-side cache is in
     # clip2trace.storage; the YAML copy carries a self-contained equivalent.
+    # Only stage if some segment actually needs the shared copy (has a keyframe
+    # window and no per-segment video_path), so a clues-only batch never downloads.
+    def _needs_shared_video(seg):
+        seg = seg if isinstance(seg, dict) else {}
+        return (
+            seg.get("start_sec") is not None
+            and seg.get("end_sec") is not None
+            and not seg.get("video_path")
+        )
+
     staging_diags = []
     video_path = input_data.get("video_path")
     file_id = input_data.get("input_video_file_id")
-    if not video_path and file_id:
+    work = segments if batch else [input_data]
+    if not video_path and file_id and any(_needs_shared_video(s) for s in work):
         try:
             from clip2trace.storage import stage_input_file
 
@@ -178,7 +206,10 @@ def handler(input_data, context):
     if batch:
         out_segments = [
             _clues_for_segment(
-                seg, context, (seg or {}).get("video_path") or video_path
+                seg,
+                context,
+                (seg.get("video_path") if isinstance(seg, dict) else None)
+                or video_path,
             )
             for seg in segments
         ]
