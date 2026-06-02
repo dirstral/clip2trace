@@ -32,15 +32,14 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 
 def _load_config() -> tuple[str, str]:
     """Return (instance_url, token) from ~/.sinas/config.json (CLI's file)."""
     cfg_path = os.path.expanduser("~/.sinas/config.json")
     if not os.path.exists(cfg_path):
         raise SystemExit("no ~/.sinas/config.json — run `sinas login` first")
-    cfg = json.load(open(cfg_path))
+    with open(cfg_path, encoding="utf-8") as fh:
+        cfg = json.load(fh)
     base = (cfg.get("instance_url") or "").rstrip("/")
     tok = cfg.get("admin_token") or cfg.get("token") or ""
     if not base or not tok:
@@ -74,12 +73,14 @@ def _http(
         },
     )
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout)
-        raw = resp.read()
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, _safe_json(resp.read())
     except urllib.error.HTTPError as exc:
-        raw = exc.read()
-        return exc.code, _safe_json(raw)
-    return resp.status, _safe_json(raw)
+        return exc.code, _safe_json(exc.read())
+    except urllib.error.URLError as exc:
+        # Connection/DNS/timeout failures: report as a non-200 so the check fails
+        # gracefully (instance unreachable -> exit 1) instead of crashing.
+        return 0, f"unreachable: {exc.reason}"
 
 
 def _safe_json(raw: bytes) -> Any:
@@ -111,14 +112,16 @@ def main() -> int:
 
     base = args.url or os.environ.get("SINAS_BASE_URL", "")
     tok = args.token or os.environ.get("SINAS_ADMIN_TOKEN", "")
+    # Fall back to the CLI's config only for whatever wasn't given explicitly, so
+    # an explicit --url (or --token) always wins over ~/.sinas/config.json.
     if not base or not tok:
         try:
-            base, default_tok = _load_config()
-            base = base or base
-            tok = tok or default_tok
+            cfg_base, cfg_tok = _load_config()
         except SystemExit as exc:
             print(str(exc), file=sys.stderr)
             return 2
+        base = base or cfg_base
+        tok = tok or cfg_tok
     if not base or not tok:
         print(
             "error: --url and --token required (or ~/.sinas/config.json)",
@@ -160,6 +163,11 @@ def main() -> int:
         # token if the token has explicit overrides)
         ("sinas.*:all", "wildcard (all)"),
     ]
+    # Only the execute-related keys gate the overall result — #44 is about whether
+    # the token can execute package functions. The other keys are printed for
+    # context (e.g. an admin-only key like llm_providers.read may legitimately be
+    # absent without meaning the token is "restricted" for our purposes).
+    gating_perms = {"sinas.functions.execute:all", "sinas.functions.execute:own"}
     print("\nPermission checks (POST /auth/check-permissions):")
     perm_results: dict[str, bool] = {}
     for perm, label in perms_to_check:
@@ -177,9 +185,16 @@ def main() -> int:
             checks = body.get("checks") or []
             granted = bool(checks[0].get("has_permission")) if checks else False
             ok = granted
-            detail = f"{perm}  ({label})"
+            suffix = "" if perm in gating_perms else "  [informational]"
+            detail = f"{perm}  ({label}){suffix}"
         perm_results[perm] = ok
-        all_ok &= _check(perm, ok, detail)
+        _check(perm, ok, detail)
+
+    # The real gate: can this token execute functions at all (either scope)?
+    can_execute = any(perm_results.get(p) for p in gating_perms)
+    all_ok &= _check(
+        "can execute package functions (execute:all OR execute:own)", can_execute
+    )
 
     # 3. Optional: actual function execute (the real test).
     if args.execute:

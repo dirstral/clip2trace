@@ -1,7 +1,7 @@
 # Research log: permissions diagnosis (corrects PR #45)
 
-_Date: 2026-06-02. Instance: via-10. Principal: `ark.deliev@student.uva.nl`
-(role `Admins`). Reproducer: `scripts/diagnose_permissions.py`._
+_Date: 2026-06-02. Instance: via-10. Principal: `<redacted>` (role `Admins`).
+Reproducer: `scripts/diagnose_permissions.py`._
 
 ## TL;DR
 
@@ -26,7 +26,7 @@ All commands are runnable via `scripts/diagnose_permissions.py`.
 
 ```bash
 curl -s -H "Authorization: Bearer $TOK" "$URL/auth/me"
-# → {"id":"149a05fb-…","email":"ark.deliev@student.uva.nl",
+# → {"id":"149a05fb-…","email":"<redacted>",
 #    "roles":["Admins"], "last_login_at":"2026-06-02T20:02:50Z",…}
 ```
 
@@ -207,10 +207,11 @@ trailing-slash redirect. Two consequences:
   (because the no-slash path is handled in FastAPI's router without the
   redirect). All the entries in the table above use the no-slash form.
 
-**Workaround in `scripts/diagnose_permissions.py`:** strip the trailing slash
-on the management API base, OR pass `--insecure-http-downgrade` and use a
-freshly-minted, scoped token. Recommended: strip the slash until the Caddy
-config is fixed.
+**Workaround in `scripts/diagnose_permissions.py`:** the script avoids the
+downgrade entirely by stripping the trailing slash on every management-API path
+(`base.rstrip("/") + path`, no `-L`-style redirect following), so the bearer
+token is never re-sent over HTTP. No special flag is needed; this holds until
+the Caddy config is fixed.
 
 The Caddy fix is operator-side (`via-10` console → reverse-proxy config; the
 runtime and console run on different services, so the fix is one line in the
