@@ -38,6 +38,13 @@ video = [
 telegram = [
     "telethon>=1.34",
 ]
+# Operator-provisioned local OCR upgrade (#27). EasyOCR pulls in torch and ~64 MB
+# of detection/recognition weights, so it does NOT fit the 512 MB pip-only worker
+# — it is a local-only option. Deliberately NOT in `dev` (CI installs `dev`).
+# On the managed worker, Claude-vision (src/clip2trace/ocr.py) is the default.
+ocr = [
+    "easyocr>=1.7",
+]
 dev = [
     "pytest>=8.0",
     "pyyaml>=6.0",
