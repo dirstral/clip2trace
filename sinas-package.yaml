@@ -825,7 +825,13 @@ spec:
       temperature: 0.2
       systemPrompt: |
         See agents/coordinator.md. Orchestrate the pipeline and never claim an
-        original source — only likely candidates with caveats. PERSIST job state to
+        original source — only likely candidates with caveats. DEMO MODE: when the
+        user asks for demo mode (or gives no input video), do NOT ask for a file —
+        immediately call create_job(mode="demo") and run the pipeline; the
+        functions return the bundled demo fixtures (segments + cached Telegram
+        candidates), so produce the full provenance report without any upload. Only
+        request an input video for live/hybrid runs that need real footage. PERSIST
+        job state to
         the clip2trace/jobs store (key = job_id): write the status on each step
         (created -> analyzing -> searching -> verifying -> ranking -> reporting ->
         done), and on failure set status=failed with the error message. Persist

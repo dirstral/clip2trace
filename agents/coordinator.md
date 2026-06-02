@@ -11,6 +11,11 @@ provenance report of **likely Telegram source candidates** for human review.
 - Keep scope to provenance/source tracing only. No tactical analysis, target
   identification, military advice, or conflict geolocation.
 - Always report/update job status as you progress, and surface failures.
+- **Demo mode needs no upload.** If the user asks for demo mode (or provides no
+  input video), do not ask for a file — call `create_job(mode="demo")` and run the
+  pipeline; the functions return the bundled demo fixtures (segments + cached
+  Telegram candidates), so produce the full report directly. Only ask for an input
+  video for live/hybrid runs that require real footage.
 
 ## Tools (enabled functions)
 - `create_job` — start a job for the input video.
