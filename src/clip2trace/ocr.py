@@ -57,7 +57,9 @@ def tesseract_ocr(rgb) -> Optional[str]:
 
 # A process-wide EasyOCR reader is expensive to build (loads torch + detection
 # and recognition models), so cache it after the first successful construction.
-_EASYOCR_READER = None
+# Keyed by the language set, so a different `languages` request builds its own
+# reader rather than silently reusing one trained on the wrong languages.
+_EASYOCR_READERS: dict = {}
 
 
 def easyocr_ocr(rgb, *, languages=("en",), reader=None) -> Optional[str]:
@@ -68,16 +70,16 @@ def easyocr_ocr(rgb, *, languages=("en",), reader=None) -> Optional[str]:
     managed worker. `reader` is injectable for tests so the parsing/joining
     logic is exercised without loading torch or any model weights.
     """
-    global _EASYOCR_READER
     if reader is None:
         try:
             import easyocr  # type: ignore
         except Exception:
             return None
+        key = tuple(languages)
         try:
-            if _EASYOCR_READER is None:
-                _EASYOCR_READER = easyocr.Reader(list(languages), gpu=False)
-            reader = _EASYOCR_READER
+            if key not in _EASYOCR_READERS:
+                _EASYOCR_READERS[key] = easyocr.Reader(list(languages), gpu=False)
+            reader = _EASYOCR_READERS[key]
         except Exception:
             return None
     try:
