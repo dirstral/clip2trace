@@ -80,6 +80,7 @@ table{border-collapse:collapse;width:100%;margin:.5rem 0} th,td{border:1px solid
 .card{border:1px solid #ddd;border-left-width:6px;border-radius:6px;padding:.75rem 1rem;margin:.75rem 0}
 .card.very_strong{border-left-color:#1a7f37} .card.strong{border-left-color:#2563eb}
 .card.plausible{border-left-color:#b08800} .card.weak{border-left-color:#cf222e} .card.reject{border-left-color:#999}
+.thumb{max-width:160px;max-height:120px;border-radius:4px;float:right;margin:0 0 .5rem 1rem;border:1px solid #ddd}
 .label{text-transform:uppercase;font-size:12px;letter-spacing:.04em}
 footer{margin-top:2rem;color:#555;font-size:13px;border-top:1px solid #eee;padding-top:.75rem}
 """.strip()
@@ -109,6 +110,9 @@ def render_html(report: Dict) -> str:
     cards = []
     for c in (r.get("ranked_candidates") or []):
         label = esc(c.get("confidence_label", "unknown"))
+        thumb = _safe_url(c.get("thumbnail_url"))
+        img = (f'<img class="thumb" src="{esc(thumb)}" loading="lazy" '
+               f'alt="candidate media thumbnail">') if thumb else ""
         url = c.get("url")
         safe = _safe_url(url)
         if safe:
@@ -125,6 +129,7 @@ def render_html(report: Dict) -> str:
             ((c.get("caveats") or []) + (c.get("recommended_next_steps") or [])))
         cards.append(
             f'<div class="card {label}">'
+            f'{img}'
             f'<h3>{esc(c.get("candidate_id"))} — '
             f'<span class="label">{label}</span> ({esc(c.get("confidence", 0))})</h3>'
             f'<p class="link">{link}</p>'

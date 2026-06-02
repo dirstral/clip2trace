@@ -69,6 +69,36 @@ def test_render_html_rejects_unsafe_url_scheme():
     assert "alert(1)" in html  # still shown for transparency (escaped, no href)
 
 
+def test_render_html_shows_safe_thumbnail():
+    ranked = [{"candidate_id": "c1", "confidence": 0.9,
+               "confidence_label": "very_strong", "rejected": False,
+               "evidence": {}, "url": "https://t.me/x/1",
+               "thumbnail_url": "https://media.example/thumb.jpg"}]
+    html = render_html(build_report("j", [], ranked))
+    assert '<img class="thumb"' in html
+    assert 'src="https://media.example/thumb.jpg"' in html
+    assert "original" not in html.lower()  # guard holds with a thumbnail present
+
+
+def test_render_html_drops_unsafe_thumbnail_scheme():
+    ranked = [{"candidate_id": "c1", "confidence": 0.9,
+               "confidence_label": "very_strong", "rejected": False,
+               "evidence": {}, "url": "https://t.me/x/1",
+               "thumbnail_url": "javascript:alert(1)"}]
+    html = render_html(build_report("j", [], ranked))
+    assert "<img" not in html          # unsafe-scheme thumbnail rendered no image
+    assert "alert(1)" not in html      # and the payload never reaches the document
+
+
+def test_rank_propagates_thumbnail_url():
+    out = _load("rank_source_candidates").handler(
+        {"candidates": [{"candidate_id": "c1",
+                         "evidence": {"visual_similarity": 0.9},
+                         "thumbnail_url": "https://media.example/t.jpg"}]}, {})
+    assert out["ranked_candidates"][0]["thumbnail_url"] == \
+        "https://media.example/t.jpg"
+
+
 def test_sanitise_replaces_all_occurrences():
     from clip2trace.report import _sanitise
     out = _sanitise("the original and the original again")

@@ -55,7 +55,8 @@ def handler(input_data, context):
                            "rejected": res.rejected, "evidence": res.evidence,
                            "caveats": res.caveats,
                            "recommended_next_steps": _NEXT_STEPS,
-                           "url": c.get("url")})
+                           "url": c.get("url"),
+                           "thumbnail_url": c.get("thumbnail_url")})
     except Exception:
         W = {"visual_similarity": 0.40, "handle_watermark": 0.15,
              "ocr_caption_query": 0.15, "predates_input": 0.15,
@@ -80,7 +81,8 @@ def handler(input_data, context):
                            "caveats": ["Telegram post may itself be a repost.",
                                        "Automated score; verify manually."],
                            "recommended_next_steps": _NEXT_STEPS,
-                           "url": c.get("url")})
+                           "url": c.get("url"),
+                           "thumbnail_url": c.get("thumbnail_url")})
 
     ranked.sort(key=lambda x: x["confidence"], reverse=True)
     return {"ranked_candidates": ranked}

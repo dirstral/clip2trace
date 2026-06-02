@@ -730,7 +730,8 @@ spec:
                             "caveats": ["Telegram post may itself be a repost.",
                                         "Automated score; verify manually."],
                             "recommended_next_steps": steps,
-                            "url": c.get("url")})
+                            "url": c.get("url"),
+                            "thumbnail_url": c.get("thumbnail_url")})
             out.sort(key=lambda x: x["confidence"], reverse=True)
             return {"ranked_candidates": out}
 
@@ -776,6 +777,11 @@ spec:
                 cards = []
                 for c in kept:
                     lbl = esc(c.get("confidence_label", "unknown"))
+                    thumb = str(c.get("thumbnail_url") or "").strip()
+                    img = ("<img src='%s' loading='lazy' alt='candidate media "
+                           "thumbnail' style='max-width:160px;float:right'>"
+                           % esc(thumb)) if thumb.lower().startswith(
+                               ("http://", "https://")) else ""
                     url = c.get("url")
                     safe = str(url or "").strip()
                     if safe.lower().startswith(("http://", "https://")):
@@ -785,9 +791,9 @@ spec:
                         link = esc(url)
                     else:
                         link = "(no link)"
-                    cards.append("<div class='card %s'><h3>%s — %s (%s)</h3>"
+                    cards.append("<div class='card %s'>%s<h3>%s — %s (%s)</h3>"
                                  "<p>%s</p></div>" % (
-                                     lbl, esc(c.get("candidate_id")), lbl,
+                                     lbl, img, esc(c.get("candidate_id")), lbl,
                                      esc(c.get("confidence", 0)), link))
                 cav = "".join("<li>%s</li>" % esc(x) for x in report["caveats"])
                 result["report_html"] = (
