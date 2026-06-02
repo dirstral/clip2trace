@@ -1,9 +1,14 @@
 import pytest
 
 from clip2trace.matching import (
-    hamming_distance, phash_similarity, best_frame_similarity,
-    text_overlap_score, temporal_alignment_score, matched_frames,
-    cluster_segments, link_candidate_to_segments,
+    best_frame_similarity,
+    cluster_segments,
+    hamming_distance,
+    link_candidate_to_segments,
+    matched_frames,
+    phash_similarity,
+    temporal_alignment_score,
+    text_overlap_score,
 )
 
 
@@ -64,8 +69,9 @@ def test_cluster_segments_groups_repeated_footage():
 
 
 def test_cluster_segments_without_phashes_are_singletons():
-    clusters = cluster_segments([{"segment_id": "a", "phashes": []},
-                                 {"segment_id": "b", "phashes": []}])
+    clusters = cluster_segments(
+        [{"segment_id": "a", "phashes": []}, {"segment_id": "b", "phashes": []}]
+    )
     assert len(clusters) == 2
 
 

@@ -21,14 +21,25 @@ def _has_module(name: str) -> bool:
 
 def handler(input_data, context):
     import os
+
     context = context or {}
     tmp = tempfile.gettempdir()
     try:
         free = shutil.disk_usage(tmp).free
     except Exception:
         free = None
-    modules = ["av", "cv2", "scenedetect", "imagehash", "PIL", "numpy",
-               "telethon", "rapidfuzz", "dateutil", "requests"]
+    modules = [
+        "av",
+        "cv2",
+        "scenedetect",
+        "imagehash",
+        "PIL",
+        "numpy",
+        "telethon",
+        "rapidfuzz",
+        "dateutil",
+        "requests",
+    ]
     return {
         "python": sys.version.split()[0],
         "modules": {m: _has_module(m) for m in modules},

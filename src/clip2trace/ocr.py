@@ -49,9 +49,15 @@ def tesseract_ocr(rgb) -> Optional[str]:
         return None
 
 
-def claude_vision_ocr(rgb, *, base_url: Optional[str], token: Optional[str],
-                      model: str = "claude-sonnet-4-6", timeout: float = 60.0,
-                      post=None) -> Optional[str]:
+def claude_vision_ocr(
+    rgb,
+    *,
+    base_url: Optional[str],
+    token: Optional[str],
+    model: str = "claude-sonnet-4-6",
+    timeout: float = 60.0,
+    post=None,
+) -> Optional[str]:
     """OCR a frame via the Sinas OpenAI-compatible chat-completions adapter.
 
     `post(url, headers, json_body) -> dict` is injectable for tests; when None a
@@ -66,19 +72,32 @@ def claude_vision_ocr(rgb, *, base_url: Optional[str], token: Optional[str],
     # content blocks through to the provider. The OpenAI `image_url` shape 500s;
     # the Anthropic `image` block works. (See docs/research/runtime-diagnostics.md.)
     body = {
-        "model": model, "max_tokens": 512,
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": _OCR_PROMPT},
-            {"type": "image", "source": {"type": "base64",
-                                         "media_type": "image/png",
-                                         "data": b64}}]}],
+        "model": model,
+        "max_tokens": 512,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _OCR_PROMPT},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": b64,
+                        },
+                    },
+                ],
+            }
+        ],
     }
-    headers = {"Authorization": "Bearer " + token,
-               "Content-Type": "application/json"}
+    headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
     try:
         if post is None:
             import requests  # type: ignore
-            resp = requests.post(url, json=body, headers=headers, timeout=timeout)
+
+            # body is a hand-built JSON payload; requests' JsonType is stricter.
+            resp = requests.post(url, json=body, headers=headers, timeout=timeout)  # type: ignore[arg-type]
             resp.raise_for_status()
             data = resp.json()
         else:
@@ -91,16 +110,22 @@ def claude_vision_ocr(rgb, *, base_url: Optional[str], token: Optional[str],
 def resolve_runtime(context) -> tuple:
     """Best-effort (base_url, token) for the runtime, from a function context."""
     import os
+
     ctx = context or {}
-    base = (ctx.get("api_url") or ctx.get("base_url")
-            or os.environ.get("SINAS_BASE_URL"))
+    base = ctx.get("api_url") or ctx.get("base_url") or os.environ.get("SINAS_BASE_URL")
     token = ctx.get("access_token")
     return base, token
 
 
-def ocr_image(rgb, *, context=None, base_url: Optional[str] = None,
-              token: Optional[str] = None, model: str = "claude-sonnet-4-6",
-              post=None) -> str:
+def ocr_image(
+    rgb,
+    *,
+    context=None,
+    base_url: Optional[str] = None,
+    token: Optional[str] = None,
+    model: str = "claude-sonnet-4-6",
+    post=None,
+) -> str:
     """Best-effort OCR of an RGB frame: tesseract -> Claude vision -> ''."""
     text = tesseract_ocr(rgb)
     if text:
@@ -109,5 +134,7 @@ def ocr_image(rgb, *, context=None, base_url: Optional[str] = None,
         rb, rt = resolve_runtime(context)
         base_url = base_url or rb
         token = token or rt
-    return claude_vision_ocr(rgb, base_url=base_url, token=token, model=model,
-                             post=post) or ""
+    return (
+        claude_vision_ocr(rgb, base_url=base_url, token=token, model=model, post=post)
+        or ""
+    )

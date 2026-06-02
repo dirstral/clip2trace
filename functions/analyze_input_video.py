@@ -24,9 +24,12 @@ def handler(input_data, context):
     if video_path:
         try:
             from clip2trace.video import detect_shots, windows_to_segments
+
             segments = windows_to_segments(
-                detect_shots(video_path), likelihood=0.5,
-                reason="shot boundary; candidate reused footage")
+                detect_shots(video_path),
+                likelihood=0.5,
+                reason="shot boundary; candidate reused footage",
+            )
             method = "shot_detection"
         except Exception as exc:
             diagnostics.append(f"shot detection unavailable: {exc!r}")
@@ -34,9 +37,12 @@ def handler(input_data, context):
     if not segments and duration:
         try:
             from clip2trace.video import uniform_windows, windows_to_segments
+
             segments = windows_to_segments(
-                uniform_windows(float(duration)), likelihood=0.3,
-                reason="uniform window; candidate reused footage")
+                uniform_windows(float(duration)),
+                likelihood=0.3,
+                reason="uniform window; candidate reused footage",
+            )
             method = "uniform_windows"
         except Exception as exc:
             diagnostics.append(f"uniform fallback failed: {exc!r}")
@@ -44,11 +50,17 @@ def handler(input_data, context):
     if not segments:
         try:
             from clip2trace.video import demo_segments
+
             segments = demo_segments()
         except Exception:
             segments = [
-                {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
-                 "source_likelihood": 0.81, "reason": "candidate reused footage"},
+                {
+                    "segment_id": "seg_001",
+                    "start_sec": 12.0,
+                    "end_sec": 24.5,
+                    "source_likelihood": 0.81,
+                    "reason": "candidate reused footage",
+                },
             ]
 
     return {

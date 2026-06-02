@@ -9,8 +9,12 @@ from __future__ import annotations
 import html as _html
 from typing import Dict, List
 
-BANNED_PHRASES = ("the original", "original post", "confirmed original",
-                  "we found the original")
+BANNED_PHRASES = (
+    "the original",
+    "original post",
+    "confirmed original",
+    "we found the original",
+)
 
 GLOBAL_CAVEATS = [
     "Global Telegram search is retrieval, not proof of origin.",
@@ -31,7 +35,7 @@ def _sanitise(text: str) -> str:
         lowered = out.lower()
         idx = lowered.find(bad)
         while idx != -1:
-            out = out[:idx] + "likely Telegram source candidate" + out[idx + len(bad):]
+            out = out[:idx] + "likely Telegram source candidate" + out[idx + len(bad) :]
             lowered = out.lower()
             idx = lowered.find(bad)
     return out
@@ -44,15 +48,21 @@ def _safe_url(url) -> str:
     return u if u.lower().startswith(("http://", "https://")) else ""
 
 
-def build_report(job_id: str, segments: List[Dict],
-                 ranked_candidates: List[Dict], *, mode: str = "demo",
-                 summary: str = "") -> Dict:
+def build_report(
+    job_id: str,
+    segments: List[Dict],
+    ranked_candidates: List[Dict],
+    *,
+    mode: str = "demo",
+    summary: str = "",
+) -> Dict:
     """Assemble the report JSON dict (schemas.ProvenanceReport shape)."""
     kept = [c for c in ranked_candidates if not c.get("rejected")]
     label_counts: Dict[str, int] = {}
     for c in kept:
-        label_counts[c.get("confidence_label", "unknown")] = \
+        label_counts[c.get("confidence_label", "unknown")] = (
             label_counts.get(c.get("confidence_label", "unknown"), 0) + 1
+        )
 
     if not summary:
         summary = (
@@ -99,20 +109,29 @@ def render_html(report: Dict) -> str:
     mode = esc(r.get("generated_mode", "demo"))
     summary = esc(_sanitise(str(r.get("summary", ""))))
 
-    seg_rows = "".join(
-        f"<tr><td>{esc(s.get('segment_id'))}</td>"
-        f"<td>{esc(s.get('start_sec'))}–{esc(s.get('end_sec'))}s</td>"
-        f"<td>{esc(s.get('source_likelihood'))}</td>"
-        f"<td>{esc(s.get('reason', ''))}</td></tr>"
-        for s in (r.get("segments") or [])
-    ) or '<tr><td colspan="4">no segments</td></tr>'
+    seg_rows = (
+        "".join(
+            f"<tr><td>{esc(s.get('segment_id'))}</td>"
+            f"<td>{esc(s.get('start_sec'))}–{esc(s.get('end_sec'))}s</td>"
+            f"<td>{esc(s.get('source_likelihood'))}</td>"
+            f"<td>{esc(s.get('reason', ''))}</td></tr>"
+            for s in (r.get("segments") or [])
+        )
+        or '<tr><td colspan="4">no segments</td></tr>'
+    )
 
     cards = []
-    for c in (r.get("ranked_candidates") or []):
+    for c in r.get("ranked_candidates") or []:
         label = esc(c.get("confidence_label", "unknown"))
         thumb = _safe_url(c.get("thumbnail_url"))
-        img = (f'<img class="thumb" src="{esc(thumb)}" loading="lazy" '
-               f'alt="candidate media thumbnail">') if thumb else ""
+        img = (
+            (
+                f'<img class="thumb" src="{esc(thumb)}" loading="lazy" '
+                f'alt="candidate media thumbnail">'
+            )
+            if thumb
+            else ""
+        )
         url = c.get("url")
         safe = _safe_url(url)
         if safe:
@@ -123,24 +142,33 @@ def render_html(report: Dict) -> str:
             link = "(no link)"
         ev_rows = "".join(
             f"<tr><td>{esc(k)}</td><td>{esc(round(float(v), 3))}</td></tr>"
-            for k, v in (c.get("evidence") or {}).items())
+            for k, v in (c.get("evidence") or {}).items()
+        )
         notes = "".join(
-            f"<li>{esc(x)}</li>" for x in
-            ((c.get("caveats") or []) + (c.get("recommended_next_steps") or [])))
+            f"<li>{esc(x)}</li>"
+            for x in (
+                (c.get("caveats") or []) + (c.get("recommended_next_steps") or [])
+            )
+        )
         cards.append(
             f'<div class="card {label}">'
-            f'{img}'
+            f"{img}"
             f'<h3>{esc(c.get("candidate_id"))} — '
             f'<span class="label">{label}</span> ({esc(c.get("confidence", 0))})</h3>'
             f'<p class="link">{link}</p>'
-            f'<table><thead><tr><th>evidence</th><th>score</th></tr></thead>'
-            f'<tbody>{ev_rows}</tbody></table>'
-            f'<details><summary>Caveats &amp; next steps</summary>'
-            f'<ul>{notes}</ul></details></div>')
+            f"<table><thead><tr><th>evidence</th><th>score</th></tr></thead>"
+            f"<tbody>{ev_rows}</tbody></table>"
+            f"<details><summary>Caveats &amp; next steps</summary>"
+            f"<ul>{notes}</ul></details></div>"
+        )
     cards_html = "\n".join(cards) or "<p>No candidates retained after scoring.</p>"
 
-    counts = ", ".join(f"{esc(k)}: {esc(v)}"
-                       for k, v in (r.get("label_counts") or {}).items()) or "none"
+    counts = (
+        ", ".join(
+            f"{esc(k)}: {esc(v)}" for k, v in (r.get("label_counts") or {}).items()
+        )
+        or "none"
+    )
     global_cav = "".join(f"<li>{esc(x)}</li>" for x in (r.get("caveats") or []))
 
     out = (
@@ -161,5 +189,6 @@ def render_html(report: Dict) -> str:
         f"<h2>Caveats</h2><ul>{global_cav}</ul>"
         "<footer>Likely candidates for human verification — not confirmed "
         "sources. Global Telegram search is retrieval, not proof.</footer>"
-        "</body></html>")
+        "</body></html>"
+    )
     return _sanitise(out)

@@ -29,8 +29,9 @@ def phash_similarity(hash_a: str, hash_b: str, bits: int = PHASH_BITS) -> float:
     return max(0.0, 1.0 - dist / float(bits))
 
 
-def best_frame_similarity(hashes_a: Sequence[str],
-                          hashes_b: Sequence[str]) -> tuple[float, int, int]:
+def best_frame_similarity(
+    hashes_a: Sequence[str], hashes_b: Sequence[str]
+) -> tuple[float, int, int]:
     """Best pairwise perceptual-hash similarity across two keyframe sets.
 
     Returns (best_similarity, index_a, index_b). Returns (0.0, -1, -1) if either
@@ -67,8 +68,9 @@ def text_overlap_score(text_a: str, text_b: str) -> float:
         return len(ta & tb) / len(ta | tb)
 
 
-def temporal_alignment_score(segment_dur: float, candidate_dur: float,
-                             tolerance: float = 0.25) -> float:
+def temporal_alignment_score(
+    segment_dur: float, candidate_dur: float, tolerance: float = 0.25
+) -> float:
     """Score how well two durations align. 1.0 == identical length.
 
     `tolerance` is the fractional difference that still scores > 0.
@@ -83,8 +85,9 @@ def temporal_alignment_score(segment_dur: float, candidate_dur: float,
     return (ratio - lo) / (1.0 - lo)
 
 
-def matched_frames(hashes_a: Sequence[str], hashes_b: Sequence[str],
-                   threshold: float = 0.85) -> List[dict]:
+def matched_frames(
+    hashes_a: Sequence[str], hashes_b: Sequence[str], threshold: float = 0.85
+) -> List[dict]:
     """Return all keyframe pairs whose perceptual similarity >= threshold."""
     out: List[dict] = []
     for i, ha in enumerate(hashes_a):
@@ -94,13 +97,17 @@ def matched_frames(hashes_a: Sequence[str], hashes_b: Sequence[str],
             except ValueError:
                 continue
             if sim >= threshold:
-                out.append({"segment_frame": i, "candidate_frame": j,
-                            "similarity": round(sim, 4)})
+                out.append(
+                    {
+                        "segment_frame": i,
+                        "candidate_frame": j,
+                        "similarity": round(sim, 4),
+                    }
+                )
     return out
 
 
-def cluster_segments(segments: Sequence[dict],
-                     threshold: float = 0.85) -> List[dict]:
+def cluster_segments(segments: Sequence[dict], threshold: float = 0.85) -> List[dict]:
     """Cluster segments that show the same footage (repeated across the video).
 
     `segments`: dicts with `segment_id` and `phashes` (hex strings). Greedy
@@ -121,22 +128,30 @@ def cluster_segments(segments: Sequence[dict],
                 placed = True
                 break
         if not placed:
-            clusters.append({"cluster_id": f"cluster_{len(clusters) + 1:03d}",
-                             "segment_ids": [sid], "phashes": list(ph)})
+            clusters.append(
+                {
+                    "cluster_id": f"cluster_{len(clusters) + 1:03d}",
+                    "segment_ids": [sid],
+                    "phashes": list(ph),
+                }
+            )
     return clusters
 
 
-def link_candidate_to_segments(candidate_phashes: Sequence[str],
-                               segments: Sequence[dict],
-                               threshold: float = 0.85) -> List[str]:
+def link_candidate_to_segments(
+    candidate_phashes: Sequence[str], segments: Sequence[dict], threshold: float = 0.85
+) -> List[str]:
     """segment_ids whose keyframes match one candidate's media.
 
     Lets a single Telegram candidate link to multiple input-video timestamps.
     """
     out: List[str] = []
     for seg in segments:
-        sim, _, _ = best_frame_similarity(candidate_phashes,
-                                          list(seg.get("phashes") or []))
+        sim, _, _ = best_frame_similarity(
+            candidate_phashes, list(seg.get("phashes") or [])
+        )
         if sim >= threshold:
-            out.append(seg.get("segment_id"))
+            sid = seg.get("segment_id")
+            if sid is not None:
+                out.append(sid)
     return out

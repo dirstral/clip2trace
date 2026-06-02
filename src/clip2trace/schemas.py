@@ -15,8 +15,16 @@ except Exception:  # pragma: no cover - pydantic is a baseline dep but stay safe
     raise
 
 Mode = Literal["demo", "live", "hybrid"]
-JobStatus = Literal["created", "analyzing", "searching", "verifying",
-                    "ranking", "reporting", "done", "failed"]
+JobStatus = Literal[
+    "created",
+    "analyzing",
+    "searching",
+    "verifying",
+    "ranking",
+    "reporting",
+    "done",
+    "failed",
+]
 
 
 class Job(BaseModel):

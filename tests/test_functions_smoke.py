@@ -15,25 +15,38 @@ for p in (SRC, FUNCS):
         sys.path.insert(0, p)
 
 FUNCTION_FILES = [
-    "create_job", "diagnose_runtime", "analyze_input_video",
-    "detect_source_segments", "extract_segment_clues",
-    "generate_telegram_queries", "search_global_telegram_posts",
-    "fetch_telegram_candidate_media", "verify_media_similarity",
-    "rank_source_candidates", "render_report",
+    "create_job",
+    "diagnose_runtime",
+    "analyze_input_video",
+    "detect_source_segments",
+    "extract_segment_clues",
+    "generate_telegram_queries",
+    "search_global_telegram_posts",
+    "fetch_telegram_candidate_media",
+    "verify_media_similarity",
+    "rank_source_candidates",
+    "render_report",
 ]
 
 MINIMAL_INPUT = {
     "create_job": {"mode": "demo"},
     "analyze_input_video": {"job_id": "job_x"},
     "detect_source_segments": {"job_id": "job_x"},
-    "extract_segment_clues": {"job_id": "job_x", "segment_id": "seg_001",
-                              "text_hint": "follow @demo_channel"},
+    "extract_segment_clues": {
+        "job_id": "job_x",
+        "segment_id": "seg_001",
+        "text_hint": "follow @demo_channel",
+    },
     "generate_telegram_queries": {"visible_handles": ["demo_channel"]},
     "search_global_telegram_posts": {"mode": "demo"},
     "fetch_telegram_candidate_media": {"candidates": []},
-    "verify_media_similarity": {"segment_phashes": ["c3e1"], "candidate_phashes": ["c3e1"]},
-    "rank_source_candidates": {"candidates": [{"candidate_id": "c1",
-                                               "evidence": {"visual_similarity": 0.9}}]},
+    "verify_media_similarity": {
+        "segment_phashes": ["c3e1"],
+        "candidate_phashes": ["c3e1"],
+    },
+    "rank_source_candidates": {
+        "candidates": [{"candidate_id": "c1", "evidence": {"visual_similarity": 0.9}}]
+    },
     "render_report": {"job_id": "job_x", "segments": [], "ranked_candidates": []},
     "diagnose_runtime": {},
 }
@@ -60,14 +73,21 @@ def test_all_functions_import_and_run():
 
 def test_handle_extraction_in_clues():
     mod = _load("extract_segment_clues")
-    out = mod.handler({"job_id": "j", "segment_id": "s",
-                       "text_hint": "watch @demo_channel"}, {})
+    out = mod.handler(
+        {"job_id": "j", "segment_id": "s", "text_hint": "watch @demo_channel"}, {}
+    )
     assert "demo_channel" in out["visible_handles"]
 
 
 def test_rank_never_emits_original():
     mod = _load("rank_source_candidates")
-    out = mod.handler({"candidates": [{"candidate_id": "c1",
-                                       "evidence": {"visual_similarity": 1.0}}]}, {})
+    out = mod.handler(
+        {
+            "candidates": [
+                {"candidate_id": "c1", "evidence": {"visual_similarity": 1.0}}
+            ]
+        },
+        {},
+    )
     blob = str(out).lower()
     assert "original" not in blob

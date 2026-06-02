@@ -22,8 +22,11 @@ SH = os.path.join(HERE, "create_issues.sh")
 
 def main() -> int:
     if shutil.which("gh") is None:
-        print("ERROR: GitHub CLI 'gh' not found. Install it and run "
-              "`gh auth login` (repo scope).", file=sys.stderr)
+        print(
+            "ERROR: GitHub CLI 'gh' not found. Install it and run "
+            "`gh auth login` (repo scope).",
+            file=sys.stderr,
+        )
         return 2
     if not os.path.exists(SH):
         print(f"ERROR: {SH} missing.", file=sys.stderr)

@@ -14,13 +14,13 @@ from typing import Dict
 
 # Rubric weights. MUST sum to 1.0.
 WEIGHTS: Dict[str, float] = {
-    "visual_similarity": 0.40,      # perceptual/visual match of keyframes
-    "handle_watermark": 0.15,       # visible @handle / watermark match
-    "ocr_caption_query": 0.15,      # OCR / caption / query text match
-    "predates_input": 0.15,         # Telegram post predates input video / date hint
-    "temporal_alignment": 0.05,     # duration / temporal alignment of the segment
-    "channel_relevance": 0.05,      # channel / source relevance
-    "forward_repost": 0.05,         # forward / repost metadata
+    "visual_similarity": 0.40,  # perceptual/visual match of keyframes
+    "handle_watermark": 0.15,  # visible @handle / watermark match
+    "ocr_caption_query": 0.15,  # OCR / caption / query text match
+    "predates_input": 0.15,  # Telegram post predates input video / date hint
+    "temporal_alignment": 0.05,  # duration / temporal alignment of the segment
+    "channel_relevance": 0.05,  # channel / source relevance
+    "forward_repost": 0.05,  # forward / repost metadata
 }
 
 # (lower_bound_inclusive, label). Checked high-to-low.
@@ -84,10 +84,16 @@ def is_rejected(score: float) -> bool:
     return clamp01(score) < REJECT_THRESHOLD
 
 
-def evidence_from_signals(*, visual: float = 0.0, text: float = 0.0,
-                          temporal: float = 0.0, handle: float = 0.0,
-                          predates: float = 0.0, channel: float = 0.0,
-                          forward: float = 0.0) -> Dict[str, float]:
+def evidence_from_signals(
+    *,
+    visual: float = 0.0,
+    text: float = 0.0,
+    temporal: float = 0.0,
+    handle: float = 0.0,
+    predates: float = 0.0,
+    channel: float = 0.0,
+    forward: float = 0.0,
+) -> Dict[str, float]:
     """Map pipeline signals (e.g. a verify_media_similarity result) onto the
     rubric's evidence dimensions. All values are clamped to [0, 1]."""
     return {
@@ -111,8 +117,9 @@ class RankedResult:
     caveats: list = field(default_factory=list)
 
 
-def score_candidate(candidate_id: str, scores: EvidenceScores,
-                    caveats: list | None = None) -> RankedResult:
+def score_candidate(
+    candidate_id: str, scores: EvidenceScores, caveats: list | None = None
+) -> RankedResult:
     """Compute confidence + label + standard caveats for one candidate."""
     conf = overall_confidence(scores)
     caveats = list(caveats or [])

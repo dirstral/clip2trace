@@ -1,6 +1,10 @@
 from clip2trace.scoring import (
-    WEIGHTS, EvidenceScores, confidence_label, overall_confidence,
-    is_rejected, score_candidate,
+    WEIGHTS,
+    EvidenceScores,
+    confidence_label,
+    is_rejected,
+    overall_confidence,
+    score_candidate,
 )
 
 
@@ -14,7 +18,7 @@ def test_overall_confidence_perfect_visual_only():
 
 
 def test_overall_confidence_all_max_is_one():
-    scores = EvidenceScores(**{k: 1.0 for k in WEIGHTS})
+    scores = EvidenceScores(**dict.fromkeys(WEIGHTS, 1.0))
     assert overall_confidence(scores) == 1.0
 
 

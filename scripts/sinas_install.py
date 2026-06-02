@@ -30,10 +30,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--preview", action="store_true",
-                    help="dry-run via /packages/preview (no changes)")
-    ap.add_argument("--primary-llm", default=os.environ.get("PRIMARY_LLM", "Claude"),
-                    help="value for the PRIMARY_LLM resource_ref (LLM provider name)")
+    ap.add_argument(
+        "--preview",
+        action="store_true",
+        help="dry-run via /packages/preview (no changes)",
+    )
+    ap.add_argument(
+        "--primary-llm",
+        default=os.environ.get("PRIMARY_LLM", "Claude"),
+        help="value for the PRIMARY_LLM resource_ref (LLM provider name)",
+    )
     ap.add_argument("--package", default=os.path.join(ROOT, "sinas-package.yaml"))
     args = ap.parse_args()
 
@@ -52,15 +58,21 @@ def main() -> int:
         "ENABLE_TELEGRAM_LIVE_SEARCH": False,
         "MAX_VIDEO_MB": "500",
     }
-    endpoint = "/api/v1/packages/preview" if args.preview else "/api/v1/packages/install"
+    endpoint = (
+        "/api/v1/packages/preview" if args.preview else "/api/v1/packages/install"
+    )
     payload = json.dumps({"source": source, "variables": variables}).encode()
 
     print(f"POST {base}{endpoint}")
-    print(f"  PRIMARY_LLM={args.primary_llm!r}  mode={'PREVIEW' if args.preview else 'INSTALL'}")
+    print(
+        f"  PRIMARY_LLM={args.primary_llm!r}  mode={'PREVIEW' if args.preview else 'INSTALL'}"
+    )
     req = urllib.request.Request(
-        base + endpoint, data=payload, method="POST",
-        headers={"Authorization": "Bearer " + tok,
-                 "Content-Type": "application/json"})
+        base + endpoint,
+        data=payload,
+        method="POST",
+        headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"},
+    )
     try:
         resp = urllib.request.urlopen(req, timeout=180)
         print("HTTP", resp.status)
