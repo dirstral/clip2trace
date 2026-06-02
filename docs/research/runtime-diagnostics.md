@@ -382,3 +382,37 @@ the instance, so the above fallbacks can be predicted before a run.
   run after PR #46 is reinstalled.
 - 100 MB `/tmp` + 512 MB RAM + 300 s remain the binding constraints for the video
   pipeline — see docs/risks.md.
+
+## CORRECTION to the "Auth / RBAC caveat" above (2026-06-02, via-10)
+
+The PR #45 diagnosis of #44 was **wrong about the permission-key format**.
+Measured against `GET /api/v1/roles/permissions/reference` (the authoritative
+permission grammar for this Sinas build) and the `Admins` user's own token:
+
+- The format is `sinas.<resource_snake>.<action>:<scope>` — e.g.
+  `sinas.functions.execute:own`, `sinas.agents.chat:own`,
+  `sinas.collections.upload:own`. `namespaced: true` is **metadata** used to
+  scope `:own` queries; it does **not** appear in the key string.
+- The `sinas.functions/<ns>/<name>.execute:own` form cited in PR #45 does
+  **not** exist as a permission key — `/auth/check-permissions` returns
+  `has_permission: false` for it.
+- The wildcard `sinas.*:all` returns `false` even for a user in `Admins`. The
+  reason isn't the wildcard itself — it's that the **token** in use was
+  created with explicit per-key overrides (`APIKeyCreate.permissions: {}` →
+  "empty = inherit from user's groups"; when non-empty, those win over the
+  role). The existing token's overrides strip almost every write/admin
+  capability, including `sinas.functions.execute:*`, `sinas.api_keys.create`,
+  `sinas.llm_providers.read:all`, and `sinas.packages.read:all`.
+
+So: the **token is the problem**, the platform is fine, and the fix is one
+admin-console action — mint a new API key with `permissions: {}` (or with
+explicit least-privilege perms). Full evidence, reproducer script, and the
+operator-side remediation are in **`docs/research/permissions-diagnosis.md`**.
+The reproducer is `scripts/diagnose_permissions.py` (run with
+`--execute clip2trace/diagnose_runtime` for the end-to-end check).
+
+A small **secondary finding** from the same probe: the Management API returns
+`307 → http://…` for any path with a trailing slash (Caddy/uvicorn is
+downgrading the request). The reproducer strips the trailing slash to avoid
+it. The Caddy config fix is operator-side; tracked as a follow-up issue.
+
