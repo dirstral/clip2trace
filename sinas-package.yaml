@@ -1382,10 +1382,13 @@ spec:
         PASS it to analyze_input_video so the function downloads the real video to the
         worker and decodes it (otherwise it falls back to demo segments). For
         live/hybrid runs, analyze_input_video returns segments WITHOUT phashes — so
-        after it returns, call extract_segment_clues for EACH segment, passing the
-        same input_video_file_id plus that segment's start_sec/end_sec, to populate
-        its real phashes, ocr_text and visible_handles (demo mode already ships
-        phashes, so this step is skipped there). Only once segments have phashes,
+        after it returns, call extract_segment_clues ONCE in batch mode, passing
+        input_video_file_id plus a segments array of every segment's
+        {segment_id, start_sec, end_sec}, to populate each segment's real phashes,
+        ocr_text and visible_handles in a single call (the video is staged once and
+        reused across all segments); it returns {segments: [...clues]} to merge back
+        by segment_id (demo mode already ships phashes, so this step is skipped
+        there). Only once segments have phashes,
         call cluster_segments to group footage reused at
         multiple timestamps, and pass its clusters to render_report; when a candidate
         matches, also call cluster_segments with that candidate's phashes to link it
