@@ -62,7 +62,9 @@ def handler(input_data, context):
         try:
             from clip2trace.storage import stage_input_file
 
-            video_path = stage_input_file(file_id, context)
+            video_path = stage_input_file(
+                file_id, context, cache_key=input_data.get("job_id")
+            )
         except Exception as exc:
             diagnostics.append(f"input staging failed: {exc!r}")
         diagnostics.append(

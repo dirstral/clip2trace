@@ -103,6 +103,33 @@ def resolve_runtime_base_url(context: Optional[Dict[str, Any]] = None) -> str:
     )
 
 
+def _safe_cache_part(value: Any) -> str:
+    text = str(value or "")
+    cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in text)
+    return cleaned.strip("._") or "scope"
+
+
+def _staged_input_path(
+    file_id: str,
+    dest_dir: str,
+    *,
+    namespace: str,
+    collection: str,
+    user_id: Optional[Any],
+    cache_key: Optional[str],
+) -> str:
+    import os
+
+    name = os.path.basename(str(file_id))
+    filename = name if "." in name else name + ".mp4"
+    scope = [dest_dir, _safe_cache_part(namespace), _safe_cache_part(collection)]
+    if user_id is not None:
+        scope.append("user_" + _safe_cache_part(user_id))
+    if cache_key:
+        scope.append("job_" + _safe_cache_part(cache_key))
+    return os.path.join(*scope, filename)
+
+
 def stage_input_file(
     file_id: str,
     context: Optional[Dict[str, Any]] = None,
@@ -110,6 +137,7 @@ def stage_input_file(
     namespace: str = "clip2trace",
     collection: str = "input-videos",
     dest_dir: Optional[str] = None,
+    cache_key: Optional[str] = None,
     max_bytes: int = _MAX_STAGED_BYTES,
     timeout: float = 120.0,
 ) -> Optional[str]:
@@ -136,8 +164,26 @@ def stage_input_file(
     # so percent-encode the path segment; the runtime decodes it server-side.
     url = f"{base}/files/{namespace}/{collection}/{quote(str(file_id), safe='')}"
     dest_dir = dest_dir or tempfile.gettempdir()
-    name = os.path.basename(str(file_id))
-    path = os.path.join(dest_dir, name if "." in name else name + ".mp4")
+    user_id = context.get("user_id")
+    path = _staged_input_path(
+        file_id,
+        dest_dir,
+        namespace=namespace,
+        collection=collection,
+        user_id=user_id,
+        cache_key=cache_key,
+    )
+    # Reuse only within a user/job-scoped cache path, so warm pooled workers do
+    # not leak staged files across jobs or users.
+    try:
+        if os.path.exists(path) and not os.path.isfile(path):
+            return None
+        if os.path.isfile(path):
+            size = os.path.getsize(path)
+            if 0 < size <= max_bytes:
+                return path
+    except OSError:
+        pass
     try:
         import requests  # baseline dep
 
@@ -155,6 +201,7 @@ def stage_input_file(
         raw = base64.b64decode(b64)
         if len(raw) > max_bytes:
             return None
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as fh:
             fh.write(raw)
         return path

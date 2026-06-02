@@ -98,3 +98,67 @@ def test_stage_input_file_rejects_oversize(monkeypatch, tmp_path):
         )
         is None
     )
+
+
+def test_stage_input_file_reuses_cached_copy(monkeypatch, tmp_path):
+    # If the file is already staged, return it WITHOUT downloading again — so
+    # per-segment extract_segment_clues calls don't re-fetch the whole video.
+    cache_dir = tmp_path / "clip2trace" / "input-videos" / "user_u1" / "job_job-1"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "vid.mp4").write_bytes(b"already-here")
+
+    def _boom(*a, **k):
+        raise AssertionError("should not download when a staged copy exists")
+
+    monkeypatch.setattr(requests, "get", _boom)
+    path = stage_input_file(
+        "vid",
+        {"access_token": "t", "user_id": "u1"},
+        dest_dir=str(tmp_path),
+        cache_key="job-1",
+    )
+    assert path == str(cache_dir / "vid.mp4")
+    with open(path, "rb") as fh:
+        assert fh.read() == b"already-here"
+
+
+def test_stage_input_file_redownloads_when_cached_copy_is_oversize(
+    monkeypatch, tmp_path
+):
+    cache_dir = tmp_path / "clip2trace" / "input-videos" / "user_u1" / "job_job-1"
+    cache_dir.mkdir(parents=True)
+    cached = cache_dir / "vid.mp4"
+    cached.write_bytes(b"x" * 200)
+
+    captured = {}
+    monkeypatch.setattr(requests, "get", _fake_get(captured, content=b"fresh"))
+    path = stage_input_file(
+        "vid",
+        {"access_token": "t", "user_id": "u1"},
+        dest_dir=str(tmp_path),
+        cache_key="job-1",
+        max_bytes=100,
+    )
+    assert path == str(cached)
+    with open(path, "rb") as fh:
+        assert fh.read() == b"fresh"
+
+
+def test_stage_input_file_returns_none_for_non_file_cache_entry(monkeypatch, tmp_path):
+    cache_dir = tmp_path / "clip2trace" / "input-videos" / "user_u1" / "job_job-1"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "vid.mp4").mkdir()
+
+    def _boom(*a, **k):
+        raise AssertionError("should not download over a non-file cache entry")
+
+    monkeypatch.setattr(requests, "get", _boom)
+    assert (
+        stage_input_file(
+            "vid",
+            {"access_token": "t", "user_id": "u1"},
+            dest_dir=str(tmp_path),
+            cache_key="job-1",
+        )
+        is None
+    )
