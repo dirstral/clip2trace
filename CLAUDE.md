@@ -126,6 +126,7 @@ are not part of the clip2trace workflow — ignore them unless explicitly asked.
 - **Never commit secrets or media**: `.env`, `.sinas/`, `*.session`, session strings, Telegram credentials, downloaded media, private datasets. All are gitignored — keep it that way.
 - Prefer **small, testable functions** over one giant handler. If behaviour changes, update tests and docs in the same change.
 - **Never commit or push directly to `main`.** Always work on a feature branch and open a **PR** against `main` (use the `github` MCP — `create_branch`, `create_pull_request`), then let it be reviewed/merged.
+- **Commit messages follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):** `type: description` or `type(scope): description` (the scope is optional). Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `build`, `ci`, `perf`, `style`; use `!` or a `BREAKING CHANGE:` footer for breaks. Lowercase the description, keep the subject ≤ ~72 chars, put detail in the body. **Do not add any AI / `Co-Authored-By` self-attribution trailer.**
 
 ## Issue & ownership workflow
 
