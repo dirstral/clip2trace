@@ -55,6 +55,16 @@ def fetch_candidate_media(candidates: List[Dict], *, dry_run: bool = True,
         return {"status": "metadata_only", "candidates": normalised,
                 "downloaded": 0, "diagnostics": diagnostics}
 
+    # Preferred: a client that downloads many candidates over one connection
+    # while enforcing per-file + total-/tmp byte budgets.
+    if hasattr(live_client, "download_candidates"):
+        res = live_client.download_candidates(
+            normalised, max_media=max_media, max_bytes=max_bytes)
+        return {"status": "ok", "candidates": res.get("candidates", normalised),
+                "downloaded": res.get("downloaded", 0),
+                "diagnostics": diagnostics + list(res.get("diagnostics", []))}
+
+    # Fallback: per-candidate download_media(cand, max_bytes=...).
     downloaded = 0
     for cand in normalised[:max_media]:
         if not cand.get("has_media") or not cand.get("accessible"):

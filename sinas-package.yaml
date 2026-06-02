@@ -704,19 +704,101 @@ spec:
           candidates: { type: array, items: { type: object } }
           dry_run: { type: boolean, default: true }
       code: |
+        # Self-contained mirror of clip2trace.telegram_media + telegram_live
+        # download_candidates. Dry-run by default (metadata only); bounded live
+        # download needs sharedPool secrets + telethon. Downloads work with the
+        # user session; bounded by per-file cap, count, and /tmp byte budget.
         def handler(input_data, context):
+            input_data = input_data or {}
+            context = context or {}
             cands = input_data.get("candidates") or []
-            out = []
-            for c in cands:
+            dry_run = input_data.get("dry_run", True)
+
+            def _norm(c):
                 ch, mid = c.get("channel"), c.get("message_id")
                 url = c.get("url")
                 if not url and ch and mid:
                     url = "https://t.me/%s/%s" % (str(ch).lstrip("@"), mid)
-                out.append({"candidate_id": c.get("candidate_id", "cand_unknown"),
-                            "url": url, "caption": c.get("caption", ""),
-                            "has_media": bool(c.get("has_media")),
-                            "accessible": c.get("accessible", True)})
-            return {"status": "metadata_only", "candidates": out, "downloaded": 0}
+                return {"candidate_id": c.get("candidate_id", "cand_unknown"),
+                        "channel": ch, "message_id": mid, "url": url,
+                        "caption": c.get("caption", ""),
+                        "has_media": bool(c.get("has_media")),
+                        "media_file_id": c.get("media_file_id"),
+                        "accessible": c.get("accessible", True)}
+
+            out = [_norm(c) for c in cands]
+            if dry_run:
+                return {"status": "metadata_only", "candidates": out, "downloaded": 0}
+
+            secrets = context.get("secrets") or {}
+            api_id = secrets.get("TELEGRAM_API_ID")
+            api_hash = secrets.get("TELEGRAM_API_HASH")
+            session = secrets.get("TELEGRAM_SESSION_STRING")
+            if not (api_id and api_hash and session):
+                return {"status": "metadata_only", "candidates": out,
+                        "downloaded": 0,
+                        "diagnostics": ["no Telegram secrets/session; metadata only"]}
+            try:
+                from telethon.sync import TelegramClient
+                from telethon.sessions import StringSession
+                from telethon.errors import FloodWaitError
+            except Exception as exc:
+                return {"status": "metadata_only", "candidates": out,
+                        "downloaded": 0,
+                        "diagnostics": ["telethon unavailable: %r" % (exc,)]}
+
+            max_media, max_bytes, total_budget = 5, 8000000, 80000000
+            inaccessible = ("ChannelPrivateError", "ChannelInvalidError",
+                            "MsgIdInvalidError", "MediaEmptyError",
+                            "FileIdInvalidError", "LocationInvalidError",
+                            "UsernameInvalidError", "UsernameNotOccupiedError")
+            downloaded, spent, diags = 0, 0, []
+            try:
+                with TelegramClient(StringSession(session), int(api_id), api_hash) as client:
+                    for cand in out:
+                        if downloaded >= max_media:
+                            break
+                        if not cand.get("has_media") or not cand.get("accessible"):
+                            continue
+                        ch, mid = cand.get("channel"), cand.get("message_id")
+                        if not ch or not mid:
+                            continue
+                        try:
+                            msg = client.get_messages(ch, ids=mid)
+                            if msg is None:
+                                cand["accessible"] = False
+                                diags.append("%s/%s: not found or deleted" % (ch, mid))
+                                continue
+                            size = getattr(getattr(msg, "file", None), "size", None)
+                            if size is not None and size > max_bytes:
+                                diags.append("%s/%s: over per-file cap" % (ch, mid))
+                                continue
+                            if size and spent + size > total_budget:
+                                diags.append("tmp byte budget reached; stopping")
+                                break
+                            path = client.download_media(msg, file="/tmp")
+                            if path is None:
+                                cand["accessible"] = False
+                                diags.append("%s/%s: no downloadable media" % (ch, mid))
+                                continue
+                            cand["media_file_id"] = path
+                            downloaded += 1
+                            spent += size or 0
+                        except FloodWaitError as exc:
+                            diags.append("flood wait %ss; stopping" %
+                                         getattr(exc, "seconds", "?"))
+                            break
+                        except Exception as exc:
+                            cand["accessible"] = False
+                            name = type(exc).__name__
+                            diags.append("%s/%s: download failed (%s)" % (ch, mid,
+                                         "inaccessible" if name in inaccessible else name))
+                return {"status": "ok", "candidates": out,
+                        "downloaded": downloaded, "diagnostics": diags}
+            except Exception as exc:
+                return {"status": "metadata_only", "candidates": out,
+                        "downloaded": downloaded,
+                        "diagnostics": ["live download error: %r" % (exc,)]}
 
     - namespace: clip2trace
       name: verify_media_similarity
