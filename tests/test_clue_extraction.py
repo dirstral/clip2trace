@@ -77,4 +77,117 @@ def test_ocr_available_is_bool():
 
 def test_requires_ids():
     mod = _load("extract_segment_clues")
+    # No segment_id and no segments list -> single mode still demands segment_id.
     assert "error" in mod.handler({"job_id": "j"}, {})
+    assert "error" in mod.handler({"segment_id": "s"}, {})
+
+
+def test_batch_mode_returns_clues_per_segment():
+    mod = _load("extract_segment_clues")
+    out = mod.handler(
+        {
+            "job_id": "j",
+            "segments": [
+                {"segment_id": "seg_001", "text_hint": "follow @one_channel"},
+                {
+                    "segment_id": "seg_002",
+                    "caption": "crowd in city square",
+                    "phashes": ["c3e1c3e1c3e1c3e1"],
+                },
+            ],
+        },
+        {},
+    )
+    assert out["implemented"] is True
+    assert [c["segment_id"] for c in out["segments"]] == ["seg_001", "seg_002"]
+    assert "one_channel" in out["segments"][0]["visible_handles"]
+    assert "c3e1c3e1c3e1c3e1" in out["segments"][1]["phashes"]
+    assert "square" in [t.lower() for t in out["segments"][1]["context_terms"]]
+    # each batched segment validates against the SegmentClues seam contract
+    for clues in out["segments"]:
+        SegmentClues(
+            **{
+                k: clues[k]
+                for k in (
+                    "segment_id",
+                    "keyframe_file_ids",
+                    "phashes",
+                    "ocr_text",
+                    "visible_handles",
+                    "context_terms",
+                    "ocr_available",
+                )
+            }
+        )
+
+
+def test_batch_mode_flags_invalid_segment_without_id():
+    mod = _load("extract_segment_clues")
+    out = mod.handler(
+        {
+            "job_id": "j",
+            "segments": [
+                {"segment_id": "seg_001", "caption": "city square"},
+                {"caption": "no id here"},  # missing segment_id
+                "not-a-dict",  # not an object
+            ],
+        },
+        {},
+    )
+    assert out["segments"][0]["implemented"] is True
+    # invalid entries are marked implemented=False, never a clues dict with id None
+    assert out["segments"][1]["implemented"] is False
+    assert out["segments"][1]["segment_id"] is None
+    assert out["segments"][2]["implemented"] is False
+
+
+def test_batch_mode_skips_staging_when_no_segment_needs_video(monkeypatch):
+    # A clues-only batch (no keyframe windows) must not download the video.
+    mod = _load("extract_segment_clues")
+    import clip2trace.storage as storage
+
+    def _boom(*a, **k):
+        raise AssertionError("should not stage when no segment has a keyframe window")
+
+    monkeypatch.setattr(storage, "stage_input_file", _boom)
+    out = mod.handler(
+        {
+            "job_id": "j",
+            "input_video_file_id": "vid.mp4",
+            "segments": [
+                {"segment_id": "seg_001", "phashes": ["c3e1c3e1c3e1c3e1"]},
+                {"segment_id": "seg_002", "caption": "city square"},
+            ],
+        },
+        {"access_token": "t", "user_id": "u1"},
+    )
+    assert [c["segment_id"] for c in out["segments"]] == ["seg_001", "seg_002"]
+
+
+def test_batch_mode_stages_input_video_only_once(monkeypatch):
+    # The whole point of batch mode: one download serves every segment, instead
+    # of one staging call per segment.
+    mod = _load("extract_segment_clues")
+    import clip2trace.storage as storage
+
+    calls = {"n": 0}
+
+    def _fake_stage(file_id, context, **kwargs):
+        calls["n"] += 1
+        return None  # no real decode; we only count staging attempts
+
+    monkeypatch.setattr(storage, "stage_input_file", _fake_stage)
+    out = mod.handler(
+        {
+            "job_id": "j",
+            "input_video_file_id": "vid.mp4",
+            "segments": [
+                {"segment_id": "seg_001", "start_sec": 0, "end_sec": 1},
+                {"segment_id": "seg_002", "start_sec": 1, "end_sec": 2},
+                {"segment_id": "seg_003", "start_sec": 2, "end_sec": 3},
+            ],
+        },
+        {"access_token": "t", "user_id": "u1"},
+    )
+    assert calls["n"] == 1
+    assert len(out["segments"]) == 3
