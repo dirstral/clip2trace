@@ -168,14 +168,54 @@ How a function gets an uploaded `input-videos` file, confirmed against
   /files/{ns}/{collection}/{filename}/url` mints a temp URL (served via
   `/files/serve/{token}`) for streaming, avoiding loading base64 into RAM.
 
-**Auth / RBAC caveat (must run from the console).** With the admin token, both
-`GET /files/clip2trace/input-videos` (list) and
-`POST /functions/clip2trace/diagnose_runtime/execute` return **403 Not authorized** —
-the same resource-level 403 noted in `sinas-investigation.md`. So functions/agents
-and file ops must be exercised from the **console UI (full user session)**, not the
-admin/scoped API token. The function's own per-execution `access_token` inherits the
-invoking user's scope; if it 403s on the files download, grant a
-`clip2trace.input-videos.read` permission in `sinas-config.yaml` to the user's role.
+**Auth / RBAC caveat — root cause found (#44).** The console session executes
+functions/agents fine, but the **API token 403s** on
+`POST /functions/clip2trace/.../execute` and `POST /agents/clip2trace/.../chats`.
+This is **not** a per-resource ACL/visibility gate and **not** a platform bug —
+it's a **permission-key *format* mismatch** (confirmed against the
+`sinas-platform/sinas` source):
+
+- The runtime requires a **namespaced** key per call —
+  `sinas.functions/<ns>/<name>.execute:own` (agents:
+  `sinas.agents/<ns>/<name>.chat:own`) — checked by
+  `core/permissions.matches_permission_pattern`.
+- A **JWT/console session** loads the user's full role permissions; the `Admins`
+  role grants `sinas.*:all`, which **does** match the namespaced key → console works.
+- An **API token** carries only its own stored permission *subset* (fixed at key
+  creation), and the flat `sinas.functions.execute:all` form **does not
+  pattern-match** the namespaced requirement → 403. `/auth/check-permissions`
+  returns `true` for the flat key only because it tests the literal string you
+  pass — a false signal; the runtime never asks for the flat form. The `404` on
+  `GET /functions/<ns>/<name>` and empty `list` are the same gap on the read path.
+- Install **sets the installer as owner** (`owner_user_id`, `managed_by=pkg:...`),
+  so **`:own` is sufficient** for the installing user — once the key carries a
+  *namespaced* key.
+
+**Confirm (decisive):** `POST /auth/check-permissions` with the **namespaced**
+string returns `false` while the flat one returns `true`:
+
+```bash
+# false (the form the runtime actually requires):
+curl -s -X POST "$SINAS_BASE_URL/auth/check-permissions" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '["sinas.functions/clip2trace/diagnose_runtime.execute:own"]'
+# true (the form you have — but it never matches a namespaced resource):
+#   -d '["sinas.functions.execute:all"]'
+```
+
+**Fix (operator-side, no package/code change):** create/use an API key whose
+`permissions` include the namespaced keys (a subset of the Admin user's perms):
+
+- `sinas.functions/clip2trace/*.execute:own`, `sinas.agents/clip2trace/*.chat:own`
+- `sinas.functions/clip2trace/*.read:own`, `sinas.agents/clip2trace/*.read:own`
+  (so reads/lists stop 404'ing)
+- simplest correct key: **`sinas.*:all`** (matches everything; Admin-only).
+
+**SDK / dashboard path:** when calling through a manifest context
+(`X-Application: clip2trace/clip2trace` header / `?app=`), results are *also*
+filtered to the manifest's `exposedNamespaces`; this package now exposes its
+functions/agents/components for that namespace (see `sinas-package.yaml`). This is
+an additional filter on top of permissions, not a replacement.
 
 **Deploy status (2026-06-02).** The #36 + #25 + #3 package update **validated**
 (`POST /api/v1/packages/preview` → `success: true`; 1 function created
