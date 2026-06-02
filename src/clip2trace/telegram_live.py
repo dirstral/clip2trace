@@ -27,16 +27,23 @@ PAGE_LIMIT = 100
 
 # Media download bounds (Sinas containers: 100 MB /tmp, 512 MB RAM, 300 s).
 MAX_MEDIA = 5
-MAX_MEDIA_BYTES = 8_000_000          # per-file cap
-MAX_TMP_BUDGET = 80_000_000          # total bytes across a fetch (under 100 MB /tmp)
+MAX_MEDIA_BYTES = 8_000_000  # per-file cap
+MAX_TMP_BUDGET = 80_000_000  # total bytes across a fetch (under 100 MB /tmp)
 
 # Telethon error class names that mean "this media is inaccessible — skip it".
 # Matched by class name so we don't hard-import telethon here.
-INACCESSIBLE_ERROR_NAMES = frozenset({
-    "ChannelPrivateError", "ChannelInvalidError", "MsgIdInvalidError",
-    "MediaEmptyError", "FileIdInvalidError", "LocationInvalidError",
-    "UsernameInvalidError", "UsernameNotOccupiedError",
-})
+INACCESSIBLE_ERROR_NAMES = frozenset(
+    {
+        "ChannelPrivateError",
+        "ChannelInvalidError",
+        "MsgIdInvalidError",
+        "MediaEmptyError",
+        "FileIdInvalidError",
+        "LocationInvalidError",
+        "UsernameInvalidError",
+        "UsernameNotOccupiedError",
+    }
+)
 
 
 def media_within_cap(size, max_bytes: int = MAX_MEDIA_BYTES) -> bool:
@@ -201,11 +208,15 @@ class TelethonSearchClient:
                     results.append(cand)
         return results
 
-    def download_candidates(self, candidates: List[Dict], *,
-                            max_media: int = MAX_MEDIA,
-                            max_bytes: int = MAX_MEDIA_BYTES,
-                            total_budget: int = MAX_TMP_BUDGET,
-                            dest_dir: str = "/tmp") -> Dict:
+    def download_candidates(
+        self,
+        candidates: List[Dict],
+        *,
+        max_media: int = MAX_MEDIA,
+        max_bytes: int = MAX_MEDIA_BYTES,
+        total_budget: int = MAX_TMP_BUDGET,
+        dest_dir: str = "/tmp",
+    ) -> Dict:
         """Download bounded media for candidates over a single connection.
 
         Caps per-file size (`max_bytes`), item count (`max_media`) and the total
@@ -241,7 +252,9 @@ class TelethonSearchClient:
                             continue
                         size = getattr(getattr(msg, "file", None), "size", None)
                         if not media_within_cap(size, max_bytes):
-                            diags.append(f"{channel}/{mid}: {size} bytes over per-file cap")
+                            diags.append(
+                                f"{channel}/{mid}: {size} bytes over per-file cap"
+                            )
                             continue
                         if size and spent + size > total_budget:
                             diags.append("tmp byte budget reached; stopping downloads")
@@ -267,7 +280,9 @@ class TelethonSearchClient:
                             except OSError:
                                 pass
                             if actual > max_bytes:
-                                diags.append(f"{channel}/{mid}: {actual} bytes over per-file cap")
+                                diags.append(
+                                    f"{channel}/{mid}: {actual} bytes over per-file cap"
+                                )
                                 continue
                             diags.append("tmp byte budget reached; stopping downloads")
                             break
@@ -275,13 +290,17 @@ class TelethonSearchClient:
                         downloaded += 1
                         spent += actual
                     except FloodWaitError as exc:
-                        diags.append(f"flood wait {getattr(exc, 'seconds', '?')}s; "
-                                     "stopping downloads")
+                        diags.append(
+                            f"flood wait {getattr(exc, 'seconds', '?')}s; "
+                            "stopping downloads"
+                        )
                         break
                     except Exception as exc:
                         cand["accessible"] = False
                         name = type(exc).__name__
-                        reason = "inaccessible" if name in INACCESSIBLE_ERROR_NAMES else name
+                        reason = (
+                            "inaccessible" if name in INACCESSIBLE_ERROR_NAMES else name
+                        )
                         diags.append(f"{channel}/{mid}: download failed ({reason})")
         except Exception as exc:  # connector / connection setup failure
             diags.append(f"download session failed: {exc!r}")

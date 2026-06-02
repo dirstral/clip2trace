@@ -12,15 +12,17 @@ import types as pytypes
 import pytest
 
 from clip2trace.telegram_live import (
-    media_within_cap, MAX_MEDIA_BYTES, TelethonSearchClient,
+    MAX_MEDIA_BYTES,
+    TelethonSearchClient,
+    media_within_cap,
 )
-from clip2trace.telegram_media import normalise_candidate, fetch_candidate_media
-
+from clip2trace.telegram_media import fetch_candidate_media, normalise_candidate
 
 # --------------------------- pure helpers ---------------------------
 
+
 def test_media_within_cap():
-    assert media_within_cap(None) is True            # unknown size allowed
+    assert media_within_cap(None) is True  # unknown size allowed
     assert media_within_cap(1000, 8000) is True
     assert media_within_cap(9000, 8000) is False
     assert media_within_cap(MAX_MEDIA_BYTES) is True
@@ -33,26 +35,32 @@ def test_normalise_candidate_builds_url():
 
 
 def test_fetch_dry_run_is_metadata_only():
-    out = fetch_candidate_media([{"channel": "demo", "message_id": 1, "has_media": True}])
+    out = fetch_candidate_media(
+        [{"channel": "demo", "message_id": 1, "has_media": True}]
+    )
     assert out["status"] == "metadata_only" and out["downloaded"] == 0
 
 
 def test_fetch_not_dry_run_without_client_is_metadata_only():
-    out = fetch_candidate_media([{"channel": "d", "message_id": 1}],
-                                dry_run=False, live_client=None)
+    out = fetch_candidate_media(
+        [{"channel": "d", "message_id": 1}], dry_run=False, live_client=None
+    )
     assert out["status"] == "metadata_only"
     assert any("no live client" in d for d in out["diagnostics"])
 
 
 # --------------------------- fake telethon download glue ---------------------------
 
+
 def _msg(mid, size, dl_none=False, actual=None):
     # `size` is what msg.file.size reports (None = unknown, e.g. some photos);
     # `actual` is the real byte count written to disk (defaults to size or 0).
     return pytypes.SimpleNamespace(
         file=(pytypes.SimpleNamespace(size=size) if size is not None else None),
-        _mid=mid, _dl_none=dl_none,
-        _actual=(actual if actual is not None else (size or 0)))
+        _mid=mid,
+        _dl_none=dl_none,
+        _actual=(actual if actual is not None else (size or 0)),
+    )
 
 
 class _DLClient:
@@ -108,8 +116,16 @@ def flood_error():
 
 
 def _cands(*ids):
-    return [{"candidate_id": f"c{m}", "channel": "demo", "message_id": m,
-             "has_media": True, "accessible": True} for m in ids]
+    return [
+        {
+            "candidate_id": f"c{m}",
+            "channel": "demo",
+            "message_id": m,
+            "has_media": True,
+            "accessible": True,
+        }
+        for m in ids
+    ]
 
 
 def _client_with(get_map):
@@ -167,14 +183,17 @@ def test_download_flood_stops(flood_error):
 
 def test_download_respects_max_media(flood_error, tmp_path):
     sc = _client_with({10: _msg(10, 100), 11: _msg(11, 100), 12: _msg(12, 100)})
-    res = sc.download_candidates(_cands(10, 11, 12), max_media=2, dest_dir=str(tmp_path))
+    res = sc.download_candidates(
+        _cands(10, 11, 12), max_media=2, dest_dir=str(tmp_path)
+    )
     assert res["downloaded"] == 2
 
 
 def test_download_respects_total_budget(flood_error, tmp_path):
     sc = _client_with({10: _msg(10, 60), 11: _msg(11, 60)})
-    res = sc.download_candidates(_cands(10, 11), total_budget=100,  # 2nd would exceed
-                                dest_dir=str(tmp_path))
+    res = sc.download_candidates(
+        _cands(10, 11), total_budget=100, dest_dir=str(tmp_path)  # 2nd would exceed
+    )
     assert res["downloaded"] == 1
     assert any("tmp byte budget" in d for d in res["diagnostics"])
 
@@ -182,7 +201,9 @@ def test_download_respects_total_budget(flood_error, tmp_path):
 def test_download_unknown_size_enforces_budget(flood_error, tmp_path):
     # size reported None (e.g. photos) but real bytes counted via os.path.getsize.
     sc = _client_with({10: _msg(10, None, actual=60), 11: _msg(11, None, actual=60)})
-    res = sc.download_candidates(_cands(10, 11), total_budget=100, dest_dir=str(tmp_path))
+    res = sc.download_candidates(
+        _cands(10, 11), total_budget=100, dest_dir=str(tmp_path)
+    )
     assert res["downloaded"] == 1  # 2nd would push spent (60+60) over 100
     assert any("tmp byte budget" in d for d in res["diagnostics"])
 
@@ -197,10 +218,22 @@ def test_download_unknown_size_over_cap_removed(flood_error, tmp_path):
 
 
 def test_download_skips_no_media_or_inaccessible(flood_error):
-    cands = [{"candidate_id": "a", "channel": "demo", "message_id": 1,
-              "has_media": False, "accessible": True},
-             {"candidate_id": "b", "channel": "demo", "message_id": 2,
-              "has_media": True, "accessible": False}]
+    cands = [
+        {
+            "candidate_id": "a",
+            "channel": "demo",
+            "message_id": 1,
+            "has_media": False,
+            "accessible": True,
+        },
+        {
+            "candidate_id": "b",
+            "channel": "demo",
+            "message_id": 2,
+            "has_media": True,
+            "accessible": False,
+        },
+    ]
     sc = _client_with({1: _msg(1, 100), 2: _msg(2, 100)})
     res = sc.download_candidates(cands)
     assert res["downloaded"] == 0  # neither attempted
@@ -211,19 +244,28 @@ def test_fetch_delegates_to_download_candidates():
         def download_candidates(self, candidates, **kw):
             for c in candidates:
                 c["media_file_id"] = "/tmp/x.bin"
-            return {"candidates": candidates, "downloaded": len(candidates),
-                    "diagnostics": ["did 1"]}
+            return {
+                "candidates": candidates,
+                "downloaded": len(candidates),
+                "diagnostics": ["did 1"],
+            }
 
-    out = fetch_candidate_media([{"channel": "demo", "message_id": 1, "has_media": True}],
-                                dry_run=False, live_client=_Live())
+    out = fetch_candidate_media(
+        [{"channel": "demo", "message_id": 1, "has_media": True}],
+        dry_run=False,
+        live_client=_Live(),
+    )
     assert out["status"] == "ok" and out["downloaded"] == 1
     assert out["candidates"][0]["media_file_id"] == "/tmp/x.bin"
 
 
 # --------------------------- function handler ---------------------------
 
-_FUNC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "functions", "fetch_telegram_candidate_media.py")
+_FUNC = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "functions",
+    "fetch_telegram_candidate_media.py",
+)
 
 
 def _load_handler():
@@ -234,12 +276,15 @@ def _load_handler():
 
 
 def test_handler_dry_run_metadata_only():
-    out = _load_handler()({"candidates": [{"channel": "d", "message_id": 1,
-                                           "has_media": True}]}, {})
+    out = _load_handler()(
+        {"candidates": [{"channel": "d", "message_id": 1, "has_media": True}]}, {}
+    )
     assert out["status"] == "metadata_only" and out["downloaded"] == 0
 
 
 def test_handler_live_without_secrets_metadata_only():
-    out = _load_handler()({"candidates": [{"channel": "d", "message_id": 1}],
-                           "dry_run": False}, {"secrets": {}})
+    out = _load_handler()(
+        {"candidates": [{"channel": "d", "message_id": 1}], "dry_run": False},
+        {"secrets": {}},
+    )
     assert out["status"] == "metadata_only"

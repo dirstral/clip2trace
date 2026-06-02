@@ -71,10 +71,14 @@ def fetch_candidate_media(
     # while enforcing per-file + total-/tmp byte budgets.
     if hasattr(live_client, "download_candidates"):
         res = live_client.download_candidates(
-            normalised, max_media=max_media, max_bytes=max_bytes)
-        return {"status": "ok", "candidates": res.get("candidates", normalised),
-                "downloaded": res.get("downloaded", 0),
-                "diagnostics": diagnostics + list(res.get("diagnostics", []))}
+            normalised, max_media=max_media, max_bytes=max_bytes
+        )
+        return {
+            "status": "ok",
+            "candidates": res.get("candidates", normalised),
+            "downloaded": res.get("downloaded", 0),
+            "diagnostics": diagnostics + list(res.get("diagnostics", [])),
+        }
 
     # Fallback: per-candidate download_media(cand, max_bytes=...).
     downloaded = 0
