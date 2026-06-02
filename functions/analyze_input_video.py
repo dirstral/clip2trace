@@ -79,10 +79,11 @@ def handler(input_data, context):
                 },
             ]
 
-    # A real upload (file_id given) that fell back to the demo fixture means
-    # staging/decode failed — flag it so async pollers surface the degradation
-    # instead of silently showing demo segments (#20).
-    degraded = bool(file_id) and method == "demo_fixture"
+    # A real upload (file_id given) that did NOT produce real shot-detected
+    # segments — i.e. it fell back to uniform windows or the demo fixture — means
+    # staging/decode failed; flag it so async pollers surface the degradation
+    # instead of silently showing fallback segments (#20).
+    degraded = bool(file_id) and method != "shot_detection"
     result = {
         "job_id": job_id,
         "status": "analyzed",

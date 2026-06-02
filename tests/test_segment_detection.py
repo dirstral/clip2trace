@@ -79,6 +79,22 @@ def test_analyze_flags_degraded_when_real_upload_cannot_decode():
     assert "vid.mp4" in out["warning"]
 
 
+def test_analyze_flags_degraded_on_uniform_fallback_for_real_upload():
+    # Real upload that can't be staged but has a duration -> uniform_windows
+    # fallback (no real frames used) is still a degraded run, not silent success.
+    out = _load("analyze_input_video").handler(
+        {
+            "job_id": "j",
+            "mode": "live",
+            "input_video_file_id": "vid.mp4",
+            "duration_sec": 20.0,
+        },
+        {},
+    )
+    assert out["method"] == "uniform_windows"
+    assert out["degraded"] is True and "warning" in out
+
+
 def _write_synth_video(path, cv2, np, frames=30, size=(64, 48), fps=10):
     fourcc = cv2.VideoWriter_fourcc(*"MJPG")
     w, h = size

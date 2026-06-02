@@ -24,9 +24,12 @@ const STATES = ["configure", "select-video", "start", "progress", "report"];
 // Bundled demo fixture so the dashboard renders end-to-end with no live instance.
 // Mirrors the shape render_report returns (docs/api-contracts.md). Cautious
 // language only — these are candidates, not "originals".
+// Shaped like render_report's report_json (docs/api-contracts.md): generated_mode
+// + rubric evidence keys (src/clip2trace/scoring.py). The live path normalizes the
+// {report_json, ...} wrapper down to this same shape before rendering.
 const DEMO_REPORT = {
   job_id: "job_demo",
-  mode: "demo",
+  generated_mode: "demo",
   segments: [
     {
       segment_id: "seg_001",
@@ -34,7 +37,7 @@ const DEMO_REPORT = {
       end_sec: 24.5,
       source_likelihood: 0.81,
       reason: "static establishing shot, no edit overlays",
-      visible_handles: ["demo_channel"],
+      visible_handles: ["@demo_channel"],
       context_terms: ["square", "crowd", "city"],
     },
   ],
@@ -51,8 +54,9 @@ const DEMO_REPORT = {
       segment_ids: ["seg_001"],
       evidence: {
         visual_similarity: 0.95,
-        text_score: 0.6,
-        predates_input: true,
+        handle_watermark: 0.8,
+        ocr_caption_query: 0.6,
+        predates_input: 1.0,
         temporal_alignment: 0.7,
       },
       caveats: [
@@ -167,7 +171,8 @@ function SegmentCard({ seg }) {
       {seg.reason && <p style={{ margin: "6px 0 0", color: "#555" }}>{seg.reason}</p>}
       {Array.isArray(seg.visible_handles) && seg.visible_handles.length > 0 && (
         <p style={{ margin: "4px 0 0", fontSize: 13 }}>
-          handles: {seg.visible_handles.map((h) => "@" + h).join(", ")}
+          {/* handles may already carry a leading @ (demo fixtures do) */}
+          handles: {seg.visible_handles.map((h) => "@" + String(h).replace(/^@+/, "")).join(", ")}
         </p>
       )}
       {Array.isArray(seg.context_terms) && seg.context_terms.length > 0 && (
@@ -199,9 +204,11 @@ function CandidateCard({ cand }) {
       )}
       {cand.rejected && <Pill tone="weak">rejected</Pill>}
       {cand.caption && <p style={{ margin: "6px 0 0", color: "#555" }}>{cand.caption}</p>}
+      {/* evidence keys mirror the scoring rubric (src/clip2trace/scoring.py); all
+          are 0..1 scores, including predates_input — render the number, not yes/no */}
       <p style={{ margin: "4px 0 0", fontSize: 13, color: "#777" }}>
-        visual {ev.visual_similarity ?? "–"} · text {ev.text_score ?? "–"} · predates{" "}
-        {ev.predates_input ? "yes" : "no"}
+        visual {ev.visual_similarity ?? "–"} · caption {ev.ocr_caption_query ?? "–"} ·
+        handle {ev.handle_watermark ?? "–"} · predates {ev.predates_input ?? "–"}
       </p>
       {cand.url && (
         <p style={{ margin: "6px 0 0" }}>
@@ -243,12 +250,27 @@ export default function Dashboard({ sinas }) {
 
   useEffect(() => stopPolling, [stopPolling]); // clear timer on unmount
 
+  // Clear any in-flight poll + stale run state before starting a fresh job, so a
+  // second run can't show a leftover execution id / report from the first.
+  const resetRun = useCallback(() => {
+    stopPolling();
+    setError(null);
+    setWarning(null);
+    setReport(null);
+    setExecutionId(null);
+  }, [stopPolling]);
+
   // Demo mode: synthesize a short progression, then show the bundled report —
   // fully offline, no client needed.
   const runDemo = useCallback(() => {
-    setError(null);
-    setWarning(null);
-    setJob({ job_id: DEMO_REPORT.job_id, status: "analyzing", mode: "demo" });
+    resetRun();
+    setStatus("analyzing");
+    setJob({
+      job_id: DEMO_REPORT.job_id,
+      status: "analyzing",
+      mode: "demo",
+      progress: 0.15,
+    });
     setExecutionId("exec_demo");
     setStage("progress");
     // status -> progress mirrors clip2trace.storage.JOB_PROGRESS.
@@ -261,7 +283,6 @@ export default function Dashboard({ sinas }) {
       ["done", 1.0],
     ];
     let i = 0;
-    stopPolling();
     pollRef.current = setInterval(() => {
       i += 1;
       const [s, progress] = steps[Math.min(i, steps.length - 1)];
@@ -273,51 +294,73 @@ export default function Dashboard({ sinas }) {
         setStage("report");
       }
     }, 500);
-  }, [stopPolling]);
+  }, [resetRun, stopPolling]);
 
   // Live/hybrid (#20): create the job, then run the LONG analysis step
   // (analyze_input_video) via async execution — it can exceed the 300 s sync
   // timeout once it downloads + decodes a real upload. Poll the execution for
   // terminal state and the jobs store for fine-grained status; surface failures.
   const runLive = useCallback(async () => {
-    setError(null);
-    setWarning(null);
+    resetRun();
     setStatus("creating");
     try {
       const created = await callFunction(sinas, "clip2trace/create_job", { mode });
-      const jobId = created.job_id || (created.result && created.result.job_id);
+      // create_job's output may be top-level or wrapped under `result`.
+      const createdData = (created && created.result) || created || {};
+      const jobId = created.job_id || createdData.job_id;
+      const fileId = created.input_video_file_id || createdData.input_video_file_id;
       setJob({ job_id: jobId, status: "created", mode });
       setStage("progress");
 
       setStatus("analyzing");
       const enq = await enqueueFunction(sinas, "clip2trace/analyze_input_video", {
         job_id: jobId,
-        input_video_file_id: created.input_video_file_id,
+        input_video_file_id: fileId,
         mode,
       });
 
       // When the analysis finishes, fetch the report for the segment/candidate view.
-      const finish = async (analysis) => {
-        // analyze_input_video flags a degraded run (real upload that fell back to
-        // demo/uniform segments) — surface it without failing the whole job (#20).
-        if (analysis && analysis.degraded) {
+      // Returns true on success, false if it surfaced an error (so the poller stops).
+      const finish = async (analysisRaw) => {
+        // Functions signal failure by returning {error: ...} rather than throwing.
+        const analysis = (analysisRaw && analysisRaw.result) || analysisRaw || {};
+        if (analysis.error) {
+          setError(`analysis failed: ${analysis.error}`);
+          setStatus("failed");
+          return false;
+        }
+        // A degraded run (real upload that fell back to demo/uniform segments) is
+        // surfaced as a warning without failing the whole job (#20).
+        if (analysis.degraded) {
           setWarning(analysis.warning || "analysis ran in degraded mode");
         }
         setJob((j) => ({ ...(j || {}), status: "reporting" }));
         const rep = await callFunction(sinas, "clip2trace/render_report", {
           job_id: jobId,
-          segments: (analysis && analysis.segments) || [],
+          segments: analysis.segments || [],
           mode,
         });
-        setReport(rep.result || rep);
+        const repData = (rep && rep.result) || rep;
+        if (repData && repData.error) {
+          setError(`report failed: ${repData.error}`);
+          setStatus("failed");
+          return false;
+        }
+        setReport(repData);
         setStatus("done");
         setStage("report");
+        return true;
       };
 
       if (enq.execution_id) {
         setExecutionId(enq.execution_id);
         stopPolling();
+        // Each tick awaits two network calls (jobs store + executions); guard so a
+        // slow tick can't overlap the next one and race state updates.
+        let inFlight = false;
         pollRef.current = setInterval(async () => {
+          if (inFlight) return;
+          inFlight = true;
           try {
             // Prefer the jobs-store status (coordinator-updated) for the label.
             const jobState = await readJobState(sinas, jobId);
@@ -338,6 +381,8 @@ export default function Dashboard({ sinas }) {
             stopPolling();
             setError(String((e && e.message) || e));
             setStatus("failed");
+          } finally {
+            inFlight = false;
           }
         }, 2000);
       } else {
@@ -348,7 +393,7 @@ export default function Dashboard({ sinas }) {
       setError(String((e && e.message) || e));
       setStatus("failed");
     }
-  }, [sinas, mode, stopPolling]);
+  }, [sinas, mode, resetRun, stopPolling]);
 
   function startJob() {
     if (mode === "demo" || !sinas) {
@@ -358,8 +403,13 @@ export default function Dashboard({ sinas }) {
     }
   }
 
-  const segments = (report && report.segments) || [];
-  const candidates = (report && report.ranked_candidates) || [];
+  // render_report returns a {report_json, summary, ...} wrapper; demo passes the
+  // inner shape directly. Normalize to the report_json so fields resolve in both.
+  const reportJson = (report && report.report_json) || report || null;
+  const segments = (reportJson && reportJson.segments) || [];
+  const candidates = (reportJson && reportJson.ranked_candidates) || [];
+  const reportMode =
+    (reportJson && (reportJson.generated_mode || reportJson.mode)) || mode;
 
   return (
     <div style={{ fontFamily: "system-ui", padding: 16, maxWidth: 920 }}>
@@ -460,7 +510,8 @@ export default function Dashboard({ sinas }) {
           {report && (
             <>
               <p>
-                {report.summary} <em style={{ color: "#777" }}>({report.mode} mode)</em>
+                {(report && report.summary) || (reportJson && reportJson.summary)}{" "}
+                <em style={{ color: "#777" }}>({reportMode} mode)</em>
               </p>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 <div style={{ flex: "1 1 360px" }}>
