@@ -259,7 +259,15 @@ def best_visual_similarity(
     non-empty; otherwise this falls back to the always-available perceptual-hash
     path so behaviour is unchanged when no embedder is wired in.
     """
-    if embeddings_a and embeddings_b:
+    # Explicit None + length checks (not truthiness): numpy arrays raise
+    # "truth value of an array is ambiguous" on `if array`, which would break the
+    # intended fallback when callers pass embeddings as numpy arrays.
+    if (
+        embeddings_a is not None
+        and embeddings_b is not None
+        and len(embeddings_a) > 0
+        and len(embeddings_b) > 0
+    ):
         sim, i, j = best_embedding_similarity(embeddings_a, embeddings_b)
         return sim, i, j, "embedding"
     sim, i, j = best_frame_similarity(hashes_a, hashes_b)
@@ -298,8 +306,14 @@ def load_clip_embedder(
     model.eval()
 
     def _embed(frame: object) -> Sequence[float]:  # pragma: no cover - needs model
-        src = frame if hasattr(frame, "mode") else Image.open(frame)  # type: ignore
-        img = src.convert("RGB")  # type: ignore[attr-defined]
+        # Accept a PIL image or a path; close any file we open promptly so batch
+        # embedding can't exhaust file descriptors. convert() returns a new image,
+        # so the opened source is safe to close immediately.
+        if isinstance(frame, Image.Image):
+            img = frame.convert("RGB")
+        else:
+            with Image.open(frame) as src:  # type: ignore[arg-type]
+                img = src.convert("RGB")
         with torch.no_grad():
             tensor = preprocess(img).unsqueeze(0)
             feats = model.encode_image(tensor)
