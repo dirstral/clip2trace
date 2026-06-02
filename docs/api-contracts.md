@@ -23,9 +23,14 @@ Out: `{segments: [{segment_id, start_sec, end_sec, source_likelihood, reason}],
 implemented}`
 
 ## extract_segment_clues  (async)
-In: `{job_id*, segment_id*, text_hint?}`
-Out: `{segment_id, keyframe_file_ids[], phashes[], ocr_text, visible_handles[],
-context_terms[], ocr_available, implemented}`
+Single: In `{job_id*, segment_id*, text_hint?}` →
+Out `{segment_id, keyframe_file_ids[], phashes[], ocr_text, visible_handles[],
+context_terms[], ocr_available, diagnostics[], implemented}`
+Batch: In `{job_id*, input_video_file_id?, segments: [{segment_id, start_sec,
+end_sec, text_hint?, caption?, ocr_text?, phashes?}, ...]}` →
+Out `{segments: [<single-shape clues>, ...], diagnostics[], implemented}`.
+Batch stages the input video **once** and reuses it across every segment, so the
+whole-video download happens a single time instead of once per segment call.
 
 ## generate_telegram_queries
 In: `{visible_handles[]?, ocr_text?, context_terms[]?, caption?}`

@@ -12,6 +12,14 @@ phashes are supplied directly (demo/cached), pass them through.
 Text (#11): regex @handle extraction + context-term derivation, plus on-instance
 OCR (tesseract if present, else Claude vision via the platform LLM); supplied
 `ocr_text` always wins. Degrades gracefully when nothing is available.
+
+Two call shapes (the input video is staged to /tmp at most ONCE per execution):
+  * single — {job_id, segment_id, start_sec, end_sec, input_video_file_id, ...}
+    returns one SegmentClues dict (backward-compatible).
+  * batch  — {job_id, input_video_file_id, segments:[{segment_id, start_sec,
+    end_sec, ...}, ...]} returns {segments:[clues, ...], diagnostics, implemented}.
+    The video is downloaded once and reused across every segment, avoiding the
+    per-segment re-stage of one function call per segment.
 """
 
 from __future__ import annotations
@@ -39,39 +47,23 @@ _STOPWORDS = {
 }
 
 
-def handler(input_data, context):
-    input_data = input_data or {}
-    if not input_data.get("job_id") or not input_data.get("segment_id"):
-        return {"error": "job_id and segment_id are required"}
+def _clues_for_segment(seg, context, video_path, seed_diagnostics=None):
+    """Compute the SegmentClues dict for one segment against a staged video_path.
 
-    text_hint = input_data.get("text_hint", "") or ""
-    caption = input_data.get("caption", "") or ""
-    ocr_text = input_data.get("ocr_text", "") or ""
-    phashes = list(input_data.get("phashes") or [])
-    keyframe_file_ids = list(input_data.get("keyframe_file_ids") or [])
-    video_path = input_data.get("video_path")
-    start, end = input_data.get("start_sec"), input_data.get("end_sec")
-    diagnostics = []
+    `video_path` is the already-staged local clip (shared across a batch); this
+    helper never stages. `seed_diagnostics` prepends any job-level notes (e.g.
+    staging messages) so single-mode output stays identical to before.
+    """
+    seg = seg or {}
+    text_hint = seg.get("text_hint", "") or ""
+    caption = seg.get("caption", "") or ""
+    ocr_text = seg.get("ocr_text", "") or ""
+    phashes = list(seg.get("phashes") or [])
+    keyframe_file_ids = list(seg.get("keyframe_file_ids") or [])
+    start, end = seg.get("start_sec"), seg.get("end_sec")
+    diagnostics = list(seed_diagnostics or [])
     ocr_available = False
     frames = []
-
-    # #36: stage a real uploaded video to /tmp so keyframes decode (self-contained
-    # in the YAML copy).
-    file_id = input_data.get("input_video_file_id")
-    if not video_path and file_id:
-        try:
-            from clip2trace.storage import stage_input_file
-
-            video_path = stage_input_file(
-                file_id, context, cache_key=input_data.get("job_id")
-            )
-        except Exception as exc:
-            diagnostics.append(f"input staging failed: {exc!r}")
-        diagnostics.append(
-            f"staged input video {file_id}"
-            if video_path
-            else f"input video {file_id} could not be staged"
-        )
 
     # --- #10 visual: extract keyframes -> perceptual hashes when possible. ---
     if video_path and start is not None and end is not None:
@@ -140,7 +132,7 @@ def handler(input_data, context):
                 break
 
     return {
-        "segment_id": input_data.get("segment_id"),
+        "segment_id": seg.get("segment_id"),
         "keyframe_file_ids": keyframe_file_ids,
         "phashes": phashes,
         "ocr_text": ocr_text,
@@ -150,3 +142,51 @@ def handler(input_data, context):
         "diagnostics": diagnostics,
         "implemented": True,
     }
+
+
+def handler(input_data, context):
+    input_data = input_data or {}
+    if not input_data.get("job_id"):
+        return {"error": "job_id is required"}
+    segments = input_data.get("segments")
+    batch = isinstance(segments, list)
+    if not batch and not input_data.get("segment_id"):
+        return {"error": "job_id and segment_id are required"}
+
+    # #36: stage a real uploaded video to /tmp so keyframes decode. Staged ONCE
+    # per execution and reused across every segment (cache_key=job_id also lets
+    # warm pooled workers reuse it across calls). The library-side cache is in
+    # clip2trace.storage; the YAML copy carries a self-contained equivalent.
+    staging_diags = []
+    video_path = input_data.get("video_path")
+    file_id = input_data.get("input_video_file_id")
+    if not video_path and file_id:
+        try:
+            from clip2trace.storage import stage_input_file
+
+            video_path = stage_input_file(
+                file_id, context, cache_key=input_data.get("job_id")
+            )
+        except Exception as exc:
+            staging_diags.append(f"input staging failed: {exc!r}")
+        staging_diags.append(
+            f"staged input video {file_id}"
+            if video_path
+            else f"input video {file_id} could not be staged"
+        )
+
+    if batch:
+        out_segments = [
+            _clues_for_segment(
+                seg, context, (seg or {}).get("video_path") or video_path
+            )
+            for seg in segments
+        ]
+        return {
+            "segments": out_segments,
+            "diagnostics": staging_diags,
+            "implemented": True,
+        }
+
+    # Single mode: fold staging notes into the one returned dict (unchanged shape).
+    return _clues_for_segment(input_data, context, video_path, staging_diags)

@@ -575,7 +575,8 @@ spec:
           end_sec: { type: number }
           phashes: { type: array, items: { type: string } }
           keyframe_file_ids: { type: array, items: { type: string } }
-        required: [job_id, segment_id]
+          segments: { type: array, items: { type: object } }
+        required: [job_id]
       code: |
         def _stage_input_video(file_id, context, cache_key=None):
             # Download an uploaded clip2trace/input-videos file to /tmp for keyframe
@@ -636,31 +637,24 @@ spec:
             except Exception:
                 return None
 
-        def handler(input_data, context):
+        def _clues_for_segment(seg, context, video_path, seed_diagnostics=None):
+            # Compute the SegmentClues dict for one segment against an already
+            # staged video_path (shared across a batch); never stages here.
             import re
-            if not input_data.get("job_id") or not input_data.get("segment_id"):
-                return {"error": "job_id and segment_id are required"}
             HANDLE_RE = re.compile(r"@([A-Za-z][A-Za-z0-9_]{3,31})")
             HASHTAG_RE = re.compile(r"#(\w{2,64})")
             WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9]{2,}")
             STOPWORDS = {"the", "and", "for", "with", "this", "that", "from",
                          "video", "live", "breaking", "news", "watch", "today",
                          "footage"}
-            text_hint = input_data.get("text_hint", "") or ""
-            caption = input_data.get("caption", "") or ""
-            ocr_text = input_data.get("ocr_text", "") or ""
-            phashes = list(input_data.get("phashes") or [])
-            keyframe_file_ids = list(input_data.get("keyframe_file_ids") or [])
-            video_path = input_data.get("video_path")
-            start, end = input_data.get("start_sec"), input_data.get("end_sec")
-            diagnostics = []
-
-            file_id = input_data.get("input_video_file_id")
-            if not video_path and file_id:
-                video_path = _stage_input_video(file_id, context, input_data.get("job_id"))
-                diagnostics.append(
-                    ("staged input video %s" % file_id) if video_path
-                    else ("input video %s could not be staged" % file_id))
+            seg = seg or {}
+            text_hint = seg.get("text_hint", "") or ""
+            caption = seg.get("caption", "") or ""
+            ocr_text = seg.get("ocr_text", "") or ""
+            phashes = list(seg.get("phashes") or [])
+            keyframe_file_ids = list(seg.get("keyframe_file_ids") or [])
+            start, end = seg.get("start_sec"), seg.get("end_sec")
+            diagnostics = list(seed_diagnostics or [])
 
             # #10 visual: keyframes -> perceptual hashes (full + center-crop).
             # Decode with OpenCV if present, else PyAV (bundles ffmpeg; no system
@@ -790,11 +784,44 @@ spec:
                 if len(context_terms) >= 8:
                     break
 
-            return {"segment_id": input_data.get("segment_id"),
+            return {"segment_id": seg.get("segment_id"),
                     "keyframe_file_ids": keyframe_file_ids, "phashes": phashes,
                     "ocr_text": ocr_text, "visible_handles": handles,
                     "context_terms": context_terms, "ocr_available": ocr_available,
                     "diagnostics": diagnostics, "implemented": True}
+
+        def handler(input_data, context):
+            # Single mode: {job_id, segment_id, ...} -> one SegmentClues dict.
+            # Batch mode:  {job_id, segments:[{segment_id, ...}, ...]} -> stage the
+            # input video ONCE, reuse it across every segment, return
+            # {segments:[clues, ...], diagnostics, implemented}.
+            input_data = input_data or {}
+            if not input_data.get("job_id"):
+                return {"error": "job_id is required"}
+            segments = input_data.get("segments")
+            batch = isinstance(segments, list)
+            if not batch and not input_data.get("segment_id"):
+                return {"error": "job_id and segment_id are required"}
+
+            staging_diags = []
+            video_path = input_data.get("video_path")
+            file_id = input_data.get("input_video_file_id")
+            if not video_path and file_id:
+                video_path = _stage_input_video(
+                    file_id, context, input_data.get("job_id"))
+                staging_diags.append(
+                    ("staged input video %s" % file_id) if video_path
+                    else ("input video %s could not be staged" % file_id))
+
+            if batch:
+                out_segments = [
+                    _clues_for_segment(
+                        seg, context, (seg or {}).get("video_path") or video_path)
+                    for seg in segments]
+                return {"segments": out_segments, "diagnostics": staging_diags,
+                        "implemented": True}
+
+            return _clues_for_segment(input_data, context, video_path, staging_diags)
 
     - namespace: clip2trace
       name: cluster_segments
