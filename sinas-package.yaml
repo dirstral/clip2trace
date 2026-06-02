@@ -47,6 +47,14 @@ spec:
       type: secret
       description: Telethon StringSession for a USER account. Required only when live search is enabled.
       required: false
+    - name: TELEGRAM_SEARCH_API_URL
+      type: text
+      description: Base URL of an optional managed Telegram search API (issue #28 fallback adapter). Leave blank to disable.
+      required: false
+    - name: TELEGRAM_SEARCH_API_KEY
+      type: secret
+      description: API key for the optional managed Telegram search fallback (used only if TELEGRAM_SEARCH_API_URL is set).
+      required: false
 
   collections:
     - namespace: clip2trace

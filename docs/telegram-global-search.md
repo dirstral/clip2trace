@@ -62,6 +62,19 @@ queries unless an operator explicitly authorises paid search.
 `live_unavailable` / `demo_no_data` status with diagnostics. The demo uses
 `cached_results` so it never depends on a live account.
 
+### Third-party managed-search fallback (#28)
+`search_posts(..., fallback_provider=...)` accepts an optional provider that runs
+**after** the direct Telethon path fails/is unavailable and **before** cached.
+`src/clip2trace/telegram_search_providers.py` ships `HttpSearchAdapter` — a
+generic adapter that duck-types `search(queries)` (same contract as the live
+client) and POSTs to a managed Telegram-search service; the concrete wire format
+is pluggable via `build_request` / `parse_results`, so a specific provider is
+optional. Configure via Sinas variables `TELEGRAM_SEARCH_API_URL` (text) +
+`TELEGRAM_SEARCH_API_KEY` (secret); `build_search_fallback_from_secrets` returns
+`None` when unset (fallback simply skipped). Results are tagged
+`source: "third_party"` and are still **retrieval, not proof** — visual
+verification decides.
+
 ## Compliance
 Provenance/source-tracing use only. Respect Telegram ToS; use a dedicated
 account; store only what the feature needs; no scraping of private/restricted

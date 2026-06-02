@@ -154,14 +154,16 @@ def search_posts(
     *,
     mode: str = "demo",
     live_client=None,
+    fallback_provider=None,
     cached_results: Optional[List[Dict]] = None,
     manual_urls: Optional[List[str]] = None,
 ) -> Dict:
-    """Dispatch search across demo/cached/manual/live paths.
+    """Dispatch search across manual/live/third-party/cached paths.
 
-    Returns {"status", "source", "candidates", "diagnostics"}. The live path is
-    only attempted when mode in {live, hybrid} AND a live_client is supplied;
-    otherwise we report exactly why live search did not run.
+    Returns {"status", "source", "candidates", "diagnostics"}. Resolution order
+    on live/hybrid: live Telethon client -> `fallback_provider` (a managed
+    third-party search adapter, issue #28) -> cached. Each is tried only if the
+    prior is unavailable or errors; we always report why a path was skipped.
     """
     diagnostics: List[str] = []
 
@@ -188,6 +190,21 @@ def search_posts(
             }
         except Exception as exc:  # never crash the pipeline on a flood-wait etc.
             diagnostics.append(f"live search failed: {exc!r}")
+            # fall through to the third-party fallback / cached
+
+    # Third-party managed search adapter — used when the direct Telethon path is
+    # unavailable or failed (issue #28). Same `search(queries)` contract.
+    if mode in ("live", "hybrid") and fallback_provider is not None:
+        try:
+            cands = fallback_provider.search(queries)
+            return {
+                "status": "ok",
+                "source": "third_party",
+                "candidates": cands,
+                "diagnostics": diagnostics,
+            }
+        except Exception as exc:
+            diagnostics.append(f"third-party search failed: {exc!r}")
             # fall through to cached/demo
 
     if cached_results is not None:
