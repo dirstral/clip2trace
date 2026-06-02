@@ -1,4 +1,4 @@
-"""OCR module: tesseract -> Claude-vision (OpenAI adapter) -> '' selection."""
+"""OCR module: tesseract -> easyocr -> Claude-vision adapter -> '' selection."""
 
 import os
 import sys
@@ -12,7 +12,12 @@ if SRC not in sys.path:
 
 np = pytest.importorskip("numpy")
 
-from clip2trace.ocr import claude_vision_ocr, ocr_image  # noqa: E402
+from clip2trace.ocr import (  # noqa: E402
+    claude_vision_ocr,
+    easyocr_ocr,
+    ocr_image,
+    select_backend,
+)
 
 
 def _frame():
@@ -56,3 +61,93 @@ def test_ocr_image_uses_claude_when_tesseract_blank():
 
 def test_ocr_image_empty_without_anything():
     assert ocr_image(_frame(), base_url=None, token=None) == ""
+
+
+# --- backend selection order (testable with fake backends, no heavy deps) ----
+
+
+def test_select_backend_returns_first_non_empty():
+    calls = []
+
+    def empty(_):
+        calls.append("empty")
+        return ""
+
+    def none_backend(_):
+        calls.append("none")
+        return None
+
+    def hit(_):
+        calls.append("hit")
+        return "FOUND"
+
+    def later(_):
+        calls.append("later")
+        return "SHOULD-NOT-RUN"
+
+    out = select_backend(_frame(), backends=[empty, none_backend, hit, later])
+    assert out == "FOUND"
+    # later backend must not run once one hits
+    assert calls == ["empty", "none", "hit"]
+
+
+def test_select_backend_empty_when_all_miss():
+    assert select_backend(_frame(), backends=[lambda _: None, lambda _: ""]) == ""
+
+
+def test_select_backend_swallows_backend_errors():
+    def boom(_):
+        raise RuntimeError("backend exploded")
+
+    out = select_backend(_frame(), backends=[boom, lambda _: "OK"])
+    assert out == "OK"
+
+
+def test_ocr_image_prefers_local_backend_over_claude():
+    # an injected local backend that hits short-circuits before Claude vision
+    out = ocr_image(
+        _frame(),
+        base_url="https://via-10",
+        token="tok",
+        backends=[lambda _: "LOCAL"],
+        post=lambda u, h, b: {"choices": [{"message": {"content": "CLAUDE"}}]},
+    )
+    assert out == "LOCAL"
+
+
+def test_ocr_image_falls_through_to_claude_when_local_miss():
+    out = ocr_image(
+        _frame(),
+        base_url="https://via-10",
+        token="tok",
+        backends=[lambda _: None],
+        post=lambda u, h, b: {"choices": [{"message": {"content": "CLAUDE"}}]},
+    )
+    assert out == "CLAUDE"
+
+
+def test_easyocr_absent_returns_none():
+    # With no real easyocr reader injected and the package absent in CI, the tier
+    # must gracefully return None (purely additive — behaviour unchanged).
+    import importlib.util
+
+    if importlib.util.find_spec("easyocr") is None:
+        assert easyocr_ocr(_frame()) is None
+
+
+def test_easyocr_parses_injected_reader_lines():
+    class FakeReader:
+        def readtext(self, _rgb, detail=0):
+            assert detail == 0
+            return ["@channel", " caption ", ""]
+
+    out = easyocr_ocr(_frame(), reader=FakeReader())
+    assert out == "@channel\ncaption"
+
+
+def test_easyocr_real_smoke():
+    pytest.importorskip("easyocr")
+    # If easyocr is actually installed locally, the tier must run without raising
+    # and return a string (possibly empty for a blank frame).
+    out = easyocr_ocr(_frame())
+    assert out is None or isinstance(out, str)

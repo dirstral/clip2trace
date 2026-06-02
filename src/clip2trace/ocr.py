@@ -1,23 +1,29 @@
 """On-instance OCR for keyframes — pip-only, no tesseract binary required.
 
 Order of preference:
-  1. **pytesseract** — when the `tesseract` binary is present (fast, local);
-  2. **Claude vision** via the Sinas OpenAI-compatible adapter
+  1. **pytesseract** — when the `tesseract` binary is present (fast, local;
+     operator-provisioned only — the managed worker has no system binaries);
+  2. **EasyOCR** — when the `easyocr` package is installed (pip-only, but the
+     torch/model footprint exceeds the 512 MB worker, so this too is an
+     operator-provisioned *local* option only — see docs/risks.md);
+  3. **Claude vision** via the Sinas OpenAI-compatible adapter
      (`POST {base}/adapters/openai/v1/chat/completions`) — needs only `requests`
      + the function's access token, so it works on the managed worker with no
-     system binaries;
-  3. `""` — the caller still regex-extracts @handles (the strongest retrieval
+     system binaries. **This is the on-worker default.**
+  4. `""` — the caller still regex-extracts @handles (the strongest retrieval
      signal), so OCR is purely additive.
 
-`claude_vision_ocr` takes an injectable `post` callable so the request shape and
-parsing are unit-testable without a live LLM.
+Tiers 1–2 are import-guarded: if the optional package is absent the tier is
+skipped and behaviour is unchanged. `claude_vision_ocr` and `select_backend`
+take injectable callables so the request shape, parsing, and selection order are
+unit-testable without a live LLM or any heavy dependency.
 """
 
 from __future__ import annotations
 
 import base64
 import io
-from typing import Optional
+from typing import Callable, Optional
 
 _OCR_PROMPT = (
     "Output ONLY the visible on-screen text in this video frame (overlays, "
@@ -45,6 +51,39 @@ def tesseract_ocr(rgb) -> Optional[str]:
         return None
     try:
         return (pytesseract.image_to_string(Image.fromarray(rgb)) or "").strip()
+    except Exception:
+        return None
+
+
+# A process-wide EasyOCR reader is expensive to build (loads torch + detection
+# and recognition models), so cache it after the first successful construction.
+_EASYOCR_READER = None
+
+
+def easyocr_ocr(rgb, *, languages=("en",), reader=None) -> Optional[str]:
+    """OCR via the optional `easyocr` package, or None if unavailable.
+
+    `easyocr` is a heavy, pip-only dependency (pulls in torch); it is an
+    operator-provisioned *local* option only — it does not fit the 512 MB
+    managed worker. `reader` is injectable for tests so the parsing/joining
+    logic is exercised without loading torch or any model weights.
+    """
+    global _EASYOCR_READER
+    if reader is None:
+        try:
+            import easyocr  # type: ignore
+        except Exception:
+            return None
+        try:
+            if _EASYOCR_READER is None:
+                _EASYOCR_READER = easyocr.Reader(list(languages), gpu=False)
+            reader = _EASYOCR_READER
+        except Exception:
+            return None
+    try:
+        # detail=0 returns just the recognised strings, top-to-bottom.
+        lines = reader.readtext(rgb, detail=0)
+        return "\n".join(s for s in (str(x).strip() for x in lines) if s).strip()
     except Exception:
         return None
 
@@ -124,6 +163,33 @@ def resolve_runtime(context) -> tuple:
     return base, token
 
 
+# Operator-provisioned local backends, tried in preference order *before* the
+# always-available Claude-vision tier. Each returns a non-empty string on a hit
+# or a falsy value (None/"") to fall through to the next tier. Injectable as a
+# list so selection order is unit-testable with fake backends.
+LOCAL_BACKENDS: tuple[Callable[..., Optional[str]], ...] = (
+    tesseract_ocr,
+    easyocr_ocr,
+)
+
+
+def select_backend(rgb, *, backends=LOCAL_BACKENDS) -> str:
+    """Run local OCR tiers in order; return the first non-empty result, else ''.
+
+    `backends` is an injectable iterable of callables taking the frame and
+    returning a string-or-None, so the selection order can be tested with fake
+    backends and no heavy dependency present.
+    """
+    for backend in backends:
+        try:
+            text = backend(rgb)
+        except Exception:
+            text = None
+        if text:
+            return text
+    return ""
+
+
 def ocr_image(
     rgb,
     *,
@@ -132,9 +198,14 @@ def ocr_image(
     token: Optional[str] = None,
     model: str = "claude-sonnet-4-6",
     post=None,
+    backends=LOCAL_BACKENDS,
 ) -> str:
-    """Best-effort OCR of an RGB frame: tesseract -> Claude vision -> ''."""
-    text = tesseract_ocr(rgb)
+    """Best-effort OCR of an RGB frame.
+
+    Tier order: local backends (tesseract -> easyocr, both operator-provisioned
+    and import-guarded) -> Claude vision (the on-worker default) -> ''.
+    """
+    text = select_backend(rgb, backends=backends)
     if text:
         return text
     if (base_url is None or token is None) and context is not None:
