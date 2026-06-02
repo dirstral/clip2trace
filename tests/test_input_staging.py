@@ -98,3 +98,18 @@ def test_stage_input_file_rejects_oversize(monkeypatch, tmp_path):
         )
         is None
     )
+
+
+def test_stage_input_file_reuses_cached_copy(monkeypatch, tmp_path):
+    # If the file is already staged, return it WITHOUT downloading again — so
+    # per-segment extract_segment_clues calls don't re-fetch the whole video.
+    (tmp_path / "vid.mp4").write_bytes(b"already-here")
+
+    def _boom(*a, **k):
+        raise AssertionError("should not download when a staged copy exists")
+
+    monkeypatch.setattr(requests, "get", _boom)
+    path = stage_input_file("vid", {"access_token": "t"}, dest_dir=str(tmp_path))
+    assert path == str(tmp_path / "vid.mp4")
+    with open(path, "rb") as fh:
+        assert fh.read() == b"already-here"

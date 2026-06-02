@@ -138,6 +138,14 @@ def stage_input_file(
     dest_dir = dest_dir or tempfile.gettempdir()
     name = os.path.basename(str(file_id))
     path = os.path.join(dest_dir, name if "." in name else name + ".mp4")
+    # Reuse an already-staged copy: workers persist /tmp across pooled executions,
+    # so per-segment extract_segment_clues calls in one job don't re-download the
+    # whole video each time. (Within a job the file doesn't change.)
+    try:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            return path
+    except OSError:
+        pass
     try:
         import requests  # baseline dep
 

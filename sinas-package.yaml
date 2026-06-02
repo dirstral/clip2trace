@@ -223,6 +223,8 @@ spec:
             name = os.path.basename(str(file_id))
             path = os.path.join(tempfile.gettempdir(),
                                 name if "." in name else name + ".mp4")
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                return path  # reuse already-staged copy (no per-segment re-download)
             cap = 90 * 1024 * 1024
             try:
                 import requests
@@ -389,6 +391,8 @@ spec:
             name = os.path.basename(str(file_id))
             path = os.path.join(tempfile.gettempdir(),
                                 name if "." in name else name + ".mp4")
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                return path  # reuse already-staged copy (no per-segment re-download)
             cap = 90 * 1024 * 1024
             try:
                 import requests
@@ -556,6 +560,8 @@ spec:
             name = os.path.basename(str(file_id))
             path = os.path.join(tempfile.gettempdir(),
                                 name if "." in name else name + ".mp4")
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                return path  # reuse already-staged copy (no per-segment re-download)
             cap = 90 * 1024 * 1024
             try:
                 import requests
