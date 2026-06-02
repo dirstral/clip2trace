@@ -61,6 +61,24 @@ def test_detect_uniform_fallback_without_video():
     assert out["method"] == "uniform_windows" and out["segments"]
 
 
+def test_analyze_demo_is_not_degraded():
+    # No real upload requested -> demo fallback is expected, not a degradation.
+    out = _load("analyze_input_video").handler({"job_id": "j", "mode": "demo"}, {})
+    assert out["status"] == "analyzed"
+    assert out["degraded"] is False and "warning" not in out
+
+
+def test_analyze_flags_degraded_when_real_upload_cannot_decode():
+    # A real upload (file_id) with no token/instance can't stage -> falls back to
+    # the demo fixture; #20 wants that surfaced, not hidden.
+    out = _load("analyze_input_video").handler(
+        {"job_id": "j", "mode": "live", "input_video_file_id": "vid.mp4"}, {}
+    )
+    assert out["method"] == "demo_fixture"
+    assert out["degraded"] is True
+    assert "vid.mp4" in out["warning"]
+
+
 def _write_synth_video(path, cv2, np, frames=30, size=(64, 48), fps=10):
     fourcc = cv2.VideoWriter_fourcc(*"MJPG")
     w, h = size

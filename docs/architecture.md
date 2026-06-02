@@ -65,11 +65,34 @@ video into memory.
 For a **real upload (#36)**, the same long steps first **download** the
 `input-videos` file to `/tmp` (via the `sinas` SDK / `host.docker.internal:8000`,
 bounded to ~90 MB) before decoding — added latency on top of decode. This is why
-those steps must run async (#20) and why their `timeout` must stay ≥ the realistic
+those steps must run async and why their `timeout` must stay ≥ the realistic
 download+decode time: the per-execution access token used for the download has a
 TTL of `timeout + 5 min`, so too short a `timeout` can expire the token mid-job.
-Wiring `/execute/async` + `/executions/{id}` polling in the dashboard is tracked
-in **#20** (the unmet "long videos via async" acceptance criterion from #9).
+
+### Async execution + progress polling (#20)
+
+The long step is invoked asynchronously and polled to terminal state:
+
+1. **Enqueue** — `POST /functions/clip2trace/analyze_input_video/execute/async`
+   returns `202` + `{execution_id}`. The caller already holds the `job_id` from
+   `create_job`; both are shown in the UI.
+2. **Poll** — `GET /executions/{execution_id}` until a terminal status. Treat
+   `completed`/`succeeded` as success (read `result`/`output`), and
+   `failed`/`error` as failure (surface `error` to the user — never swallow it).
+3. **Fine-grained status** — the coordinator also writes job lifecycle to the
+   `clip2trace/jobs` store (key = `job_id`): `created → analyzing → searching →
+   verifying → ranking → reporting → done`, with a `progress` float. The
+   dashboard has **readonly** access to that store and prefers its `status`/
+   `progress` for the label, falling back to the execution status. On failure the
+   coordinator sets `status=failed` with the error.
+
+The dashboard (`components/dashboard.jsx`) implements exactly this: it enqueues
+`analyze_input_video`, polls both the execution and the jobs store every 2 s,
+renders `job_id`/`execution_id`/`status`/`progress`, and shows failures inline.
+Demo mode simulates the same progression offline. The embed-context `sinas`
+client method names are feature-detected (see the component's adapter helpers),
+so the exact SDK surface can be reconciled against the live instance without
+changing the contract above.
 
 ## Why retrieval ≠ proof (and visual verification is the differentiator)
 Global Telegram search only *retrieves candidates*. A caption/handle match is

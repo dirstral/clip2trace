@@ -79,12 +79,22 @@ def handler(input_data, context):
                 },
             ]
 
-    return {
+    # A real upload (file_id given) that fell back to the demo fixture means
+    # staging/decode failed — flag it so async pollers surface the degradation
+    # instead of silently showing demo segments (#20).
+    degraded = bool(file_id) and method == "demo_fixture"
+    result = {
         "job_id": job_id,
         "status": "analyzed",
         "mode": mode,
         "method": method,
         "segments": segments,
+        "degraded": degraded,
         "diagnostics": diagnostics,
         "next_step": "extract_segment_clues",
     }
+    if degraded:
+        result["warning"] = (
+            f"input video {file_id} could not be decoded; using fallback segments"
+        )
+    return result

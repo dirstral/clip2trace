@@ -372,10 +372,19 @@ spec:
                      "phashes": ["5a5a5a5a5a5a5a5a"], "ocr_text": "",
                      "visible_handles": [], "context_terms": []}]
 
-            return {"job_id": job_id, "status": "analyzed", "mode": mode,
-                    "method": method, "segments": segments,
-                    "diagnostics": diagnostics,
-                    "next_step": "extract_segment_clues"}
+            # A real upload (file_id given) that fell back to the demo fixture
+            # means staging/decode failed — flag it so async pollers surface the
+            # degradation instead of silently showing demo segments (#20).
+            degraded = bool(file_id) and method == "demo_fixture"
+            result = {"job_id": job_id, "status": "analyzed", "mode": mode,
+                      "method": method, "segments": segments,
+                      "degraded": degraded, "diagnostics": diagnostics,
+                      "next_step": "extract_segment_clues"}
+            if degraded:
+                result["warning"] = (
+                    "input video %s could not be decoded; using fallback segments"
+                    % file_id)
+            return result
 
     - namespace: clip2trace
       name: detect_source_segments
@@ -1526,6 +1535,7 @@ spec:
       visibility: shared
       enabledFunctions:
         - clip2trace/create_job
+        - clip2trace/analyze_input_video
         - clip2trace/render_report
       enabledStores:
         - { store: clip2trace/jobs, access: readonly }
@@ -1622,6 +1632,25 @@ spec:
           const ex = (sinas && sinas.executions) || {};
           if (typeof ex.get === "function") return ex.get(executionId);
           throw new Error("sinas client exposes no executions.get");
+        }
+
+        // The coordinator persists job status to the clip2trace/jobs store (key = job_id)
+        // as it advances created -> analyzing -> ... -> done; the component has readonly
+        // access, so this is the richest progress signal. Best-effort: returns null if
+        // the store API isn't reachable from this embed context.
+        async function readJobState(sinas, jobId) {
+          const stores = (sinas && sinas.stores) || {};
+          try {
+            if (typeof stores.get === "function") {
+              return await stores.get("clip2trace/jobs", jobId);
+            }
+            if (typeof stores.getState === "function") {
+              return await stores.getState({ store: "clip2trace/jobs", key: jobId });
+            }
+          } catch (e) {
+            return null;
+          }
+          return null;
         }
 
         // --- presentational pieces ----------------------------------------------------
@@ -1744,6 +1773,7 @@ spec:
           const [status, setStatus] = useState("idle");
           const [executionId, setExecutionId] = useState(null);
           const [error, setError] = useState(null);
+          const [warning, setWarning] = useState(null);
           const pollRef = useRef(null);
 
           const stopPolling = useCallback(() => {
@@ -1759,17 +1789,26 @@ spec:
           // fully offline, no client needed.
           const runDemo = useCallback(() => {
             setError(null);
+            setWarning(null);
             setJob({ job_id: DEMO_REPORT.job_id, status: "analyzing", mode: "demo" });
             setExecutionId("exec_demo");
             setStage("progress");
-            const steps = ["analyzing", "searching", "verifying", "ranking", "reporting", "done"];
+            // status -> progress mirrors clip2trace.storage.JOB_PROGRESS.
+            const steps = [
+              ["analyzing", 0.15],
+              ["searching", 0.4],
+              ["verifying", 0.6],
+              ["ranking", 0.8],
+              ["reporting", 0.9],
+              ["done", 1.0],
+            ];
             let i = 0;
             stopPolling();
             pollRef.current = setInterval(() => {
               i += 1;
-              const s = steps[Math.min(i, steps.length - 1)];
+              const [s, progress] = steps[Math.min(i, steps.length - 1)];
               setStatus(s);
-              setJob((j) => ({ ...(j || {}), status: s }));
+              setJob((j) => ({ ...(j || {}), status: s, progress }));
               if (s === "done") {
                 stopPolling();
                 setReport(DEMO_REPORT);
@@ -1778,10 +1817,13 @@ spec:
             }, 500);
           }, [stopPolling]);
 
-          // Live/hybrid: create the job, then render the report. The long analysis step
-          // is async — kick it off, then poll the execution for visible progress (#20).
+          // Live/hybrid (#20): create the job, then run the LONG analysis step
+          // (analyze_input_video) via async execution — it can exceed the 300 s sync
+          // timeout once it downloads + decodes a real upload. Poll the execution for
+          // terminal state and the jobs store for fine-grained status; surface failures.
           const runLive = useCallback(async () => {
             setError(null);
+            setWarning(null);
             setStatus("creating");
             try {
               const created = await callFunction(sinas, "clip2trace/create_job", { mode });
@@ -1789,37 +1831,60 @@ spec:
               setJob({ job_id: jobId, status: "created", mode });
               setStage("progress");
 
-              // Enqueue the report build (stands in for the long async pipeline). When a
-              // real execution_id comes back, poll it; otherwise we already have a result.
               setStatus("analyzing");
-              const enq = await enqueueFunction(sinas, "clip2trace/render_report", {
+              const enq = await enqueueFunction(sinas, "clip2trace/analyze_input_video", {
                 job_id: jobId,
+                input_video_file_id: created.input_video_file_id,
                 mode,
               });
+
+              // When the analysis finishes, fetch the report for the segment/candidate view.
+              const finish = async (analysis) => {
+                // analyze_input_video flags a degraded run (real upload that fell back to
+                // demo/uniform segments) — surface it without failing the whole job (#20).
+                if (analysis && analysis.degraded) {
+                  setWarning(analysis.warning || "analysis ran in degraded mode");
+                }
+                setJob((j) => ({ ...(j || {}), status: "reporting" }));
+                const rep = await callFunction(sinas, "clip2trace/render_report", {
+                  job_id: jobId,
+                  segments: (analysis && analysis.segments) || [],
+                  mode,
+                });
+                setReport(rep.result || rep);
+                setStatus("done");
+                setStage("report");
+              };
+
               if (enq.execution_id) {
                 setExecutionId(enq.execution_id);
                 stopPolling();
                 pollRef.current = setInterval(async () => {
                   try {
+                    // Prefer the jobs-store status (coordinator-updated) for the label.
+                    const jobState = await readJobState(sinas, jobId);
                     const ex = await getExecution(sinas, enq.execution_id);
-                    setStatus(ex.status || "running");
+                    setStatus((jobState && jobState.status) || ex.status || "running");
+                    if (jobState && typeof jobState.progress === "number") {
+                      setJob((j) => ({ ...(j || {}), progress: jobState.progress }));
+                    }
                     if (ex.status === "completed" || ex.status === "succeeded") {
                       stopPolling();
-                      setReport(ex.result || ex.output);
-                      setStage("report");
+                      await finish(ex.result || ex.output);
                     } else if (ex.status === "failed" || ex.status === "error") {
                       stopPolling();
-                      setError(ex.error || "execution failed");
+                      setError(ex.error || "analysis execution failed");
+                      setStatus("failed");
                     }
                   } catch (e) {
                     stopPolling();
                     setError(String((e && e.message) || e));
+                    setStatus("failed");
                   }
                 }, 2000);
               } else {
-                setStatus("done");
-                setReport(enq.result);
-                setStage("report");
+                // Synchronous fallback (short jobs / clients without async support).
+                await finish(enq.result);
               }
             } catch (e) {
               setError(String((e && e.message) || e));
@@ -1858,6 +1923,12 @@ spec:
               {error && (
                 <div style={{ background: "#7a2e2e", color: "#fff", padding: 10, borderRadius: 6 }}>
                   Error: {error}
+                </div>
+              )}
+
+              {warning && (
+                <div style={{ background: "#8d6e00", color: "#fff", padding: 10, borderRadius: 6 }}>
+                  Warning: {warning}
                 </div>
               )}
 
@@ -1910,11 +1981,16 @@ spec:
                     )}
                   </p>
                   <p>
-                    status: <strong>{status}</strong> {pollRef.current ? "(polling…)" : ""}
+                    status: <strong>{status}</strong>
+                    {job && typeof job.progress === "number"
+                      ? ` · ${Math.round(job.progress * 100)}%`
+                      : ""}{" "}
+                    {pollRef.current ? "(polling…)" : ""}
                   </p>
                   <p style={{ color: "#777", fontSize: 13 }}>
-                    Long analysis runs async (execute/async → poll /executions/&#123;id&#125;); failures
-                    surface above.
+                    The long analysis step (<code>analyze_input_video</code>) runs async
+                    (execute/async → poll /executions/&#123;id&#125; + the clip2trace/jobs store);
+                    failures surface above.
                   </p>
                 </section>
               )}

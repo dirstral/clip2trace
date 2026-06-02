@@ -34,10 +34,11 @@ Component `clip2trace/dashboard` (skeleton in `components/dashboard.jsx`).
 - **Demo mode (#19):** runs fully offline against a bundled fixture — `create_job`
   → simulated progression → segment cards + candidate cards + cautious report.
   No live instance needed, so the component always renders end-to-end.
-- **Live/hybrid (#19/#20):** calls the package functions through the injected
-  `sinas` client (`create_job` → `render_report`); the long analysis step is
-  enqueued async and the execution is polled for visible progress, with failures
-  surfaced in the UI. `job_id` and `execution_id` are shown on the progress view.
+- **Live/hybrid (#19/#20):** `create_job` → enqueue the long **`analyze_input_video`**
+  step async (`execute/async`) → poll both the execution and the `clip2trace/jobs`
+  store every 2 s → `render_report`. `job_id`, `execution_id`, `status`, and a
+  `progress` % are shown on the progress view; failures surface inline. See the
+  "Async execution + progress polling (#20)" section in `docs/architecture.md`.
 - The authoritative deployable source is the component `sourceCode` block in
   `sinas-package.yaml`; `components/dashboard.jsx` is the readable dev copy. A
   test (`tests/test_component_sync.py`) keeps the two in sync.

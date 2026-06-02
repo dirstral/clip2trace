@@ -14,8 +14,12 @@ rapidfuzz,...}, tools{ffmpeg,tesseract}, tmp_dir, tmp_free_bytes,
 has_access_token, secrets_available}`
 
 ## analyze_input_video  (async)
-In: `{job_id*, input_video_file_id?, mode?}`
-Out: `{job_id, status: "analyzed", segments_ref, next_step}`
+In: `{job_id*, input_video_file_id?, video_path?, duration_sec?, mode?}`
+Out: `{job_id, status: "analyzed", method, segments[], degraded, diagnostics[],
+next_step, warning?}`
+Runs long → invoke via `execute/async` and poll (see architecture.md "Async
+execution + progress polling"). `degraded: true` (+ a `warning`) when a real
+upload could not be decoded and the run fell back to demo/uniform segments.
 
 ## detect_source_segments  (async)
 In: `{job_id*, input_video_file_id?, video_path?}`
