@@ -27,8 +27,9 @@ def handler(input_data, context):
         from clip2trace.telegram_media import fetch_candidate_media
         return fetch_candidate_media(candidates, dry_run=dry_run,
                                      live_client=live_client)
-    except Exception:
+    except Exception as exc:
         # Self-contained metadata-only fallback (mirrors the inline YAML block).
+        # Surface the cause so import/packaging regressions are diagnosable.
         out = []
         for c in candidates:
             ch, mid = c.get("channel"), c.get("message_id")
@@ -39,4 +40,5 @@ def handler(input_data, context):
                         "url": url, "caption": c.get("caption", ""),
                         "has_media": bool(c.get("has_media")),
                         "accessible": c.get("accessible", True)})
-        return {"status": "metadata_only", "candidates": out, "downloaded": 0}
+        return {"status": "metadata_only", "candidates": out, "downloaded": 0,
+                "diagnostics": [f"fell back to metadata-only: {exc!r}"]}

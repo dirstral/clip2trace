@@ -17,6 +17,7 @@ of candidate dicts (the `TelegramCandidate` shape in docs/data-model.md).
 
 from __future__ import annotations
 
+import os
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 # Conservative defaults — we are a courteous client on a risky API.
@@ -200,49 +201,77 @@ class TelethonSearchClient:
         deleted/private media. Returns
         {"candidates", "downloaded", "diagnostics"}. Never raises.
         """
-        from telethon.errors import FloodWaitError  # lazy
-
         updated = [dict(c) for c in candidates]
         downloaded, spent, diags = 0, 0, []
-        with self._connector() as client:
-            for cand in updated:
-                if downloaded >= max_media:
-                    break
-                if not cand.get("has_media") or not cand.get("accessible"):
-                    continue
-                channel, mid = cand.get("channel"), cand.get("message_id")
-                if not channel or not mid:
-                    continue
-                try:
-                    msg = client.get_messages(channel, ids=mid)
-                    if msg is None:
-                        cand["accessible"] = False
-                        diags.append(f"{channel}/{mid}: not found or deleted")
-                        continue
-                    size = getattr(getattr(msg, "file", None), "size", None)
-                    if not media_within_cap(size, max_bytes):
-                        diags.append(f"{channel}/{mid}: {size} bytes over per-file cap")
-                        continue
-                    if size and spent + size > total_budget:
-                        diags.append("tmp byte budget reached; stopping downloads")
+        try:
+            from telethon.errors import FloodWaitError  # lazy
+        except Exception as exc:  # telethon missing — don't raise, report
+            diags.append(f"telethon unavailable: {exc!r}")
+            self.diagnostics.extend(diags)
+            return {"candidates": updated, "downloaded": 0, "diagnostics": diags}
+
+        try:
+            with self._connector() as client:  # connect can fail (bad secrets)
+                for cand in updated:
+                    if downloaded >= max_media:
                         break
-                    path = client.download_media(msg, file=dest_dir)
-                    if path is None:
-                        cand["accessible"] = False
-                        diags.append(f"{channel}/{mid}: no downloadable media")
+                    if not cand.get("has_media") or not cand.get("accessible"):
                         continue
-                    cand["media_file_id"] = path
-                    downloaded += 1
-                    spent += size or 0
-                except FloodWaitError as exc:
-                    diags.append(f"flood wait {getattr(exc, 'seconds', '?')}s; "
-                                 "stopping downloads")
-                    break
-                except Exception as exc:
-                    cand["accessible"] = False
-                    name = type(exc).__name__
-                    reason = "inaccessible" if name in INACCESSIBLE_ERROR_NAMES else name
-                    diags.append(f"{channel}/{mid}: download failed ({reason})")
+                    channel, mid = cand.get("channel"), cand.get("message_id")
+                    if not channel or not mid:
+                        continue
+                    try:
+                        msg = client.get_messages(channel, ids=mid)
+                        if msg is None:
+                            cand["accessible"] = False
+                            diags.append(f"{channel}/{mid}: not found or deleted")
+                            continue
+                        size = getattr(getattr(msg, "file", None), "size", None)
+                        if not media_within_cap(size, max_bytes):
+                            diags.append(f"{channel}/{mid}: {size} bytes over per-file cap")
+                            continue
+                        if size and spent + size > total_budget:
+                            diags.append("tmp byte budget reached; stopping downloads")
+                            break
+                        path = client.download_media(msg, file=dest_dir)
+                        if path is None:
+                            cand["accessible"] = False
+                            diags.append(f"{channel}/{mid}: no downloadable media")
+                            continue
+                        # Enforce caps against the ACTUAL bytes written:
+                        # msg.file.size is an estimate for photos and None for
+                        # some media, so an unknown/under-reported size must not
+                        # be allowed to blow the per-file cap or /tmp budget.
+                        actual = size
+                        if actual is None:
+                            try:
+                                actual = os.path.getsize(path)
+                            except OSError:
+                                actual = 0
+                        if actual > max_bytes or spent + actual > total_budget:
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
+                            if actual > max_bytes:
+                                diags.append(f"{channel}/{mid}: {actual} bytes over per-file cap")
+                                continue
+                            diags.append("tmp byte budget reached; stopping downloads")
+                            break
+                        cand["media_file_id"] = path
+                        downloaded += 1
+                        spent += actual
+                    except FloodWaitError as exc:
+                        diags.append(f"flood wait {getattr(exc, 'seconds', '?')}s; "
+                                     "stopping downloads")
+                        break
+                    except Exception as exc:
+                        cand["accessible"] = False
+                        name = type(exc).__name__
+                        reason = "inaccessible" if name in INACCESSIBLE_ERROR_NAMES else name
+                        diags.append(f"{channel}/{mid}: download failed ({reason})")
+        except Exception as exc:  # connector / connection setup failure
+            diags.append(f"download session failed: {exc!r}")
         self.diagnostics.extend(diags)
         return {"candidates": updated, "downloaded": downloaded, "diagnostics": diags}
 

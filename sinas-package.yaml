@@ -739,6 +739,7 @@ spec:
                         "downloaded": 0,
                         "diagnostics": ["no Telegram secrets/session; metadata only"]}
             try:
+                import os
                 from telethon.sync import TelegramClient
                 from telethon.sessions import StringSession
                 from telethon.errors import FloodWaitError
@@ -781,9 +782,25 @@ spec:
                                 cand["accessible"] = False
                                 diags.append("%s/%s: no downloadable media" % (ch, mid))
                                 continue
+                            actual = size
+                            if actual is None:
+                                try:
+                                    actual = os.path.getsize(path)
+                                except OSError:
+                                    actual = 0
+                            if actual > max_bytes or spent + actual > total_budget:
+                                try:
+                                    os.remove(path)
+                                except OSError:
+                                    pass
+                                if actual > max_bytes:
+                                    diags.append("%s/%s: over per-file cap" % (ch, mid))
+                                    continue
+                                diags.append("tmp byte budget reached; stopping")
+                                break
                             cand["media_file_id"] = path
                             downloaded += 1
-                            spent += size or 0
+                            spent += actual
                         except FloodWaitError as exc:
                             diags.append("flood wait %ss; stopping" %
                                          getattr(exc, "seconds", "?"))
