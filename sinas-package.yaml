@@ -1452,7 +1452,14 @@ spec:
         - clip2trace.reports.read:all
       optionalPermissions:
         - clip2trace.telegram.search:all
-      exposedNamespaces: {}
+      # Expose the package's resources for the manifest-scoped SDK/app path
+      # (X-Application header). Without this, app-context calls are filtered to
+      # an empty set even with correct permissions. See #44 and
+      # docs/research/runtime-diagnostics.md. Format is {resourceType: [namespaces]}.
+      exposedNamespaces:
+        functions: [clip2trace]
+        agents: [clip2trace]
+        components: [clip2trace]
       storeDependencies: []
 
   dependencies:
