@@ -120,11 +120,19 @@ def windows_to_segments(windows: List[dict], *, prefix: str = "seg",
 
 
 # Deterministic demo segments for fixture/demo mode (no video runtime needed).
+# Each carries its clues inline (phashes/ocr_text/handles) so the demo produces a
+# real match without a video: seg_001's phash matches the cached cand_demo_1
+# candidate (-> strong); seg_002's does not (-> stays low, showing discrimination).
 DEMO_SEGMENTS = [
     {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
-     "source_likelihood": 0.81, "reason": "candidate reused footage"},
+     "source_likelihood": 0.81, "reason": "candidate reused footage",
+     "phashes": ["c3e1c3e1c3e1c3e1"], "ocr_text": "LIVE FROM DEMO",
+     "visible_handles": ["@demo_channel"],
+     "context_terms": ["demo", "street", "crowd"]},
     {"segment_id": "seg_002", "start_sec": 58.2, "end_sec": 67.0,
-     "source_likelihood": 0.64, "reason": "candidate reused footage"},
+     "source_likelihood": 0.64, "reason": "candidate reused footage",
+     "phashes": ["0f0f0f0f0f0f0f0f"], "ocr_text": "",
+     "visible_handles": [], "context_terms": []},
 ]
 
 

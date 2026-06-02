@@ -33,7 +33,10 @@ provenance report of **likely Telegram source candidates** for human review.
 4. `search_global_telegram_posts`. If status is `live_unavailable`, say so
    explicitly and fall back to demo/cached results — never fabricate hits.
 5. `fetch_telegram_candidate_media` (dry-run unless live + bounded).
-6. `verify_media_similarity` per candidate; delegate scoring to **evidence-ranker**.
+6. `verify_media_similarity` per candidate — **pass the segment's `phashes` +
+   `ocr_text` and the candidate's `phashes` + `caption`** (and durations from the
+   timecodes), or the visual score comes back 0 and candidates are wrongly
+   rejected; delegate scoring to **evidence-ranker**.
 7. `rank_source_candidates`.
 8. Delegate the writeup to **report-writer** / `render_report`.
 

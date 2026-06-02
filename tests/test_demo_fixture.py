@@ -62,6 +62,26 @@ def test_demo_fixture_spans_confidence_bands():
     assert by_id["cand_demo_2"]["confidence"] < by_id["cand_demo_1"]["confidence"]
 
 
+def test_demo_segments_match_cached_candidate():
+    """Demo must surface a real candidate (not reject everything): seg_001's
+    inline phash matches cand_demo_1 → strong, after verify+rank."""
+    from clip2trace.video import demo_segments
+    verify, rank = _load("verify_media_similarity"), _load("rank_source_candidates")
+    seg = demo_segments()[0]
+    assert seg.get("phashes"), "demo seg_001 must carry phashes for a real match"
+    cand = _fixture("sample_telegram_results.json")[0]
+    v = verify.handler({"segment_phashes": seg["phashes"],
+                        "candidate_phashes": cand["phashes"],
+                        "segment_text": seg.get("ocr_text", ""),
+                        "candidate_text": cand.get("caption", "")}, {})
+    assert v["visual_score"] == 1.0
+    ranked = rank.handler({"candidates": [{
+        "candidate_id": cand["candidate_id"], "verification": v,
+        "handle_match": 1.0}]}, {})["ranked_candidates"]
+    assert not ranked[0]["rejected"]
+    assert ranked[0]["confidence_label"] in ("plausible", "strong", "very_strong")
+
+
 def test_make_demo_fixture_check_passes():
     import subprocess
     script = os.path.join(ROOT, "scripts", "make_demo_fixture.py")

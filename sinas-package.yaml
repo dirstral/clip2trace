@@ -270,9 +270,14 @@ spec:
             if not segments:
                 segments = [
                     {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
-                     "source_likelihood": 0.81, "reason": "candidate reused footage"},
+                     "source_likelihood": 0.81, "reason": "candidate reused footage",
+                     "phashes": ["c3e1c3e1c3e1c3e1"], "ocr_text": "LIVE FROM DEMO",
+                     "visible_handles": ["@demo_channel"],
+                     "context_terms": ["demo", "street", "crowd"]},
                     {"segment_id": "seg_002", "start_sec": 58.2, "end_sec": 67.0,
-                     "source_likelihood": 0.64, "reason": "candidate reused footage"}]
+                     "source_likelihood": 0.64, "reason": "candidate reused footage",
+                     "phashes": ["0f0f0f0f0f0f0f0f"], "ocr_text": "",
+                     "visible_handles": [], "context_terms": []}]
 
             return {"job_id": job_id, "status": "analyzed", "mode": mode,
                     "method": method, "segments": segments,
@@ -365,9 +370,14 @@ spec:
 
             return {"segments": [
                 {"segment_id": "seg_001", "start_sec": 12.0, "end_sec": 24.5,
-                 "source_likelihood": 0.81, "reason": "candidate reused footage"},
+                 "source_likelihood": 0.81, "reason": "candidate reused footage",
+                 "phashes": ["c3e1c3e1c3e1c3e1"], "ocr_text": "LIVE FROM DEMO",
+                 "visible_handles": ["@demo_channel"],
+                 "context_terms": ["demo", "street", "crowd"]},
                 {"segment_id": "seg_002", "start_sec": 58.2, "end_sec": 67.0,
-                 "source_likelihood": 0.64, "reason": "candidate reused footage"}],
+                 "source_likelihood": 0.64, "reason": "candidate reused footage",
+                 "phashes": ["0f0f0f0f0f0f0f0f"], "ocr_text": "",
+                 "visible_handles": [], "context_terms": []}],
                 "method": "demo_fixture", "implemented": True,
                 "diagnostics": diagnostics}
 
@@ -830,8 +840,13 @@ spec:
         immediately call create_job(mode="demo") and run the pipeline; the
         functions return the bundled demo fixtures (segments + cached Telegram
         candidates), so produce the full provenance report without any upload. Only
-        request an input video for live/hybrid runs that need real footage. PERSIST
-        job state to
+        request an input video for live/hybrid runs that need real footage. When
+        calling verify_media_similarity, you MUST pass segment_phashes (the
+        segment's phashes), candidate_phashes (the candidate's phashes),
+        segment_text (the segment's ocr_text), candidate_text (the candidate's
+        caption), and segment_duration/candidate_duration from the timecodes —
+        otherwise the visual score is 0 and every candidate is wrongly rejected.
+        PERSIST job state to
         the clip2trace/jobs store (key = job_id): write the status on each step
         (created -> analyzing -> searching -> verifying -> ranking -> reporting ->
         done), and on failure set status=failed with the error message. Persist
