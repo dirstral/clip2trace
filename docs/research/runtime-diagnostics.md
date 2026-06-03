@@ -416,3 +416,31 @@ A small **secondary finding** from the same probe: the Management API returns
 downgrading the request). The reproducer strips the trailing slash to avoid
 it. The Caddy config fix is operator-side; tracked as a follow-up issue.
 
+## Channel-scoped tracing on-instance — `enumerate_channel_videos` (2026-06-03)
+
+First live run of the **channel-scoped** path on the worker (PR #64), driven via
+the Management/runtime API with a `sinas.*:all` token after **Reload Workers**.
+Execute API notes (confirmed here): `POST /functions/{ns}/{name}/execute` (no
+`/api/v1` prefix; that returns 404), body `{"input": {...}}` (NOT `input_data`),
+response envelope `{status, execution_id, result, error}`. File upload =
+`POST /files/{ns}/{collection}` `{name, content_base64, content_type}` → 201;
+delete = `DELETE /files/{ns}/{collection}/{name}` → 204.
+
+| Step (executed live) | Result |
+|---|---|
+| `diagnose_runtime` | 200; `secrets` present in context |
+| `enumerate_channel_videos` `{channel:clip2trace, mode:live, max_videos:10}` | `status: ok, source: live`, **7 candidates**, each `channel_relevance=1.0` + `t.me/clip2trace/<msg>` |
+| `fetch_telegram_candidate_media` `{dry_run:false}` | **4 downloaded + phashed** (msgs 9,8,4,3); msgs 7/6/5 skipped — over the 8 MB per-file cap (real bound) |
+| upload `Israel…mkv` → `analyze_input_video` (live) | staged on the worker; **4 segments**, `scene cut (pyav)` (opencv path falls back on `libxcb` — expected) |
+| `extract_segment_clues` (batch) | 4 segments, **24 real phashes** |
+| `verify_media_similarity` (input vs each candidate) | msg **8 = 1.000**; msgs 9/4/3 = 0.66–0.72 (baseline) |
+| `rank_source_candidates` | **`t.me/clip2trace/8` top @ 0.500 `plausible`**; rest `weak` |
+| `render_report` | cautious summary, no `"original"` leak; top candidate = the input's own post |
+
+**Result:** the on-instance production pipeline traces an uploaded video into the
+channel corpus and ranks its own post top at `visual=1.0 / plausible` — matching
+the local proof (PR #63, `channel-scoped-tracing.md`). The remaining samples
+(msgs 5/6/7) are >8 MB so the worker skips download under the per-file cap; the
+local run (no cap) confirms all 5. `enumerate_channel_videos` is `area:telegram`
+(Ark's domain) — built per direction, PR #64 requests his review.
+
