@@ -116,6 +116,71 @@ def test_function_cached_demo_and_live_unavailable():
 
     live = mod.handler({"channel": "x", "mode": "live"}, {"secrets": {}})
     assert live["status"] == "live_unavailable"
+    # Empty secrets -> build_client_from_secrets returns None (the "missing
+    # secrets" path), NOT a swallowed import/exception error masquerading as
+    # live_unavailable. Assert the *reason*, so the test can't pass for the
+    # wrong cause.
+    live_diag = " ".join(live.get("diagnostics", [])).lower()
+    assert "missing" in live_diag
+    assert "enumeration error" not in live_diag
 
     no_channel = mod.handler({"mode": "live"}, {"secrets": {"TELEGRAM_API_ID": "1"}})
     assert no_channel["status"] == "live_unavailable"
+    assert "no channel" in " ".join(no_channel.get("diagnostics", [])).lower()
+
+
+def test_live_path_actually_invokes_build_client(monkeypatch):
+    """The live branch must really reach build_client_from_secrets and degrade on
+    a None client — not rely on an ImportError being swallowed into the same
+    live_unavailable return (which is why asserting status alone is too weak)."""
+    import clip2trace.telegram_live as tl
+
+    calls = []
+
+    def fake_build(secrets):
+        calls.append(secrets)
+        return None
+
+    monkeypatch.setattr(tl, "build_client_from_secrets", fake_build)
+    mod = _load("enumerate_channel_videos")
+    secrets = {
+        "TELEGRAM_API_ID": "1",
+        "TELEGRAM_API_HASH": "h",
+        "TELEGRAM_SESSION_STRING": "s",
+    }
+    out = mod.handler({"channel": "clip2trace", "mode": "live"}, {"secrets": secrets})
+
+    assert calls == [secrets]  # reached and called with the real secrets
+    assert out["status"] == "live_unavailable"
+    assert "missing" in " ".join(out.get("diagnostics", [])).lower()
+
+
+def test_live_path_returns_client_candidates(monkeypatch):
+    """A usable client's enumerate_channel results flow through as source=live."""
+    import clip2trace.telegram_live as tl
+
+    class _FakeChannelClient:
+        diagnostics = ["scanned 1 channel"]
+
+        def __init__(self):
+            self.seen = None
+
+        def enumerate_channel(self, channel, max_videos=10):
+            self.seen = (channel, max_videos)
+            return [{"candidate_id": f"{channel}_9", "channel_relevance": 1.0}]
+
+    client = _FakeChannelClient()
+    monkeypatch.setattr(tl, "build_client_from_secrets", lambda s: client)
+    mod = _load("enumerate_channel_videos")
+    out = mod.handler(
+        {"channel": "clip2trace", "mode": "live", "max_videos": 5},
+        {"secrets": {"TELEGRAM_API_ID": "1"}},
+    )
+
+    assert out["status"] == "ok"
+    assert out["source"] == "live"
+    assert out["candidates"] == [
+        {"candidate_id": "clip2trace_9", "channel_relevance": 1.0}
+    ]
+    assert out["diagnostics"] == ["scanned 1 channel"]
+    assert client.seen == ("clip2trace", 5)
