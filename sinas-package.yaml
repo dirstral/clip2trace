@@ -576,10 +576,12 @@ spec:
           phashes: { type: array, items: { type: string } }
           keyframe_file_ids: { type: array, items: { type: string } }
           segments: { type: array, items: { type: object } }
+        # Single mode requires segment_id; batch mode requires segments. This is
+        # enforced in the handler (returns a clear `error`), NOT via a top-level
+        # JSON-Schema `anyOf` — the agent tool-builder cannot convert a root-level
+        # anyOf into an LLM tool definition and fails agent init with a 500 for
+        # every agent that enables this function (coordinator, source-segment-analyst).
         required: [job_id]
-        anyOf:
-          - { required: [segment_id] }   # single mode
-          - { required: [segments] }     # batch mode
       code: |
         def _stage_input_video(file_id, context, cache_key=None):
             # Download an uploaded clip2trace/input-videos file to /tmp for keyframe
