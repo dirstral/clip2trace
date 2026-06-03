@@ -1059,6 +1059,99 @@ spec:
                     "diagnostics": ["demo mode and no cached_results/manual_urls supplied"]}
 
     - namespace: clip2trace
+      name: enumerate_channel_videos
+      description: List a known channel's video posts as candidates (channel-scoped mode) or cached/demo fallback.
+      sharedPool: true
+      timeout: 120
+      inputSchema:
+        type: object
+        properties:
+          channel: { type: string }
+          max_videos: { type: integer, default: 10 }
+          mode: { type: string, default: demo }
+          cached_results: { type: array, items: { type: object } }
+      code: |
+        # Self-contained: the sandbox can't import clip2trace. Mirrors
+        # src/clip2trace/telegram_live.enumerate_channel. iter_messages is
+        # user-account; .mkv posts are documents, so match video by mime/ext too.
+        # Channel-scoped: no global index, no premium, no caption dependency.
+        def handler(input_data, context):
+            input_data = input_data or {}
+            context = context or {}
+            mode = input_data.get("mode", "demo")
+            channel = input_data.get("channel")
+            max_videos = int(input_data.get("max_videos", 10) or 10)
+            cached = input_data.get("cached_results")
+            if cached is not None:
+                return {"status": "ok", "source": "cached", "candidates": cached}
+            if mode in ("live", "hybrid"):
+                if not channel:
+                    return {"status": "live_unavailable", "source": "none",
+                            "candidates": [], "diagnostics":
+                            ["no channel supplied for channel-scoped enumeration"]}
+                secrets = context.get("secrets") or {}
+                api_id = secrets.get("TELEGRAM_API_ID")
+                api_hash = secrets.get("TELEGRAM_API_HASH")
+                session = secrets.get("TELEGRAM_SESSION_STRING")
+                if not (api_id and api_hash and session):
+                    return {"status": "live_unavailable", "source": "none",
+                            "candidates": [], "diagnostics":
+                            ["missing Telegram secrets/session or not sharedPool"]}
+                try:
+                    from telethon.sync import TelegramClient
+                    from telethon.sessions import StringSession
+                except Exception as exc:
+                    return {"status": "live_unavailable", "source": "none",
+                            "candidates": [], "diagnostics":
+                            ["telethon unavailable: %r" % (exc,)]}
+                exts = (".mkv", ".mp4", ".mov", ".webm", ".avi", ".m4v")
+                def is_video_like(m):
+                    if getattr(m, "video", None) is not None:
+                        return True
+                    f = getattr(m, "file", None)
+                    if f is None:
+                        return False
+                    mime = (getattr(f, "mime_type", None) or "").lower()
+                    if mime.startswith("video/"):
+                        return True
+                    nm = (getattr(f, "name", None) or "").lower()
+                    ext = (getattr(f, "ext", None) or "").lower()
+                    return nm.endswith(exts) or ext in exts
+                results = []
+                try:
+                    with TelegramClient(StringSession(session), int(api_id), api_hash) as client:
+                        entity = client.get_entity(channel)
+                        username = getattr(entity, "username", None)
+                        source_q = "channel:%s" % (username or channel)
+                        for m in client.iter_messages(entity, limit=300):
+                            if len(results) >= max_videos:
+                                break
+                            if getattr(m, "media", None) is None or not is_video_like(m):
+                                continue
+                            mid = getattr(m, "id", None)
+                            date = getattr(m, "date", None)
+                            results.append({
+                                "candidate_id": "%s_%s" % (username or "unknown", mid),
+                                "channel": username, "message_id": mid,
+                                "url": ("https://t.me/%s/%s" % (username, mid))
+                                       if username and mid else None,
+                                "posted_at": date.isoformat()
+                                             if hasattr(date, "isoformat") else None,
+                                "caption": getattr(m, "message", "") or "",
+                                "has_media": True,
+                                "is_forward": getattr(m, "fwd_from", None) is not None,
+                                "accessible": True, "channel_relevance": 1.0,
+                                "source_query": source_q})
+                    return {"status": "ok", "source": "live",
+                            "candidates": results, "diagnostics": []}
+                except Exception as exc:
+                    return {"status": "live_unavailable", "source": "none",
+                            "candidates": [], "diagnostics":
+                            ["channel enumeration error: %r" % (exc,)]}
+            return {"status": "demo_no_data", "source": "none", "candidates": [],
+                    "diagnostics": ["demo mode and no cached_results supplied"]}
+
+    - namespace: clip2trace
       name: fetch_telegram_candidate_media
       description: Fetch candidate metadata and optionally bounded media (dry-run by default).
       sharedPool: true
@@ -1512,6 +1605,20 @@ spec:
         segment_text (the segment's ocr_text), candidate_text (the candidate's
         caption), and segment_duration/candidate_duration from the timecodes —
         otherwise the visual score is 0 and every candidate is wrongly rejected.
+        CHANNEL MODE: when the user gives a channel (a @username / t.me link) to
+        trace the input video INTO, run the input front-half as above
+        (create_job -> analyze_input_video -> extract_segment_clues to get the
+        input's real phashes), then instead of generate_telegram_queries +
+        search_global_telegram_posts, call enumerate_channel_videos with that
+        channel and mode=live to list the channel's videos as candidates. Then
+        fetch_telegram_candidate_media(dry_run=false) to download + phash each
+        candidate, and for each candidate call verify_media_similarity with
+        segment_phashes = the input video's combined phashes and
+        candidate_phashes = that candidate's phashes (plus durations); keep each
+        candidate's channel_relevance (enumerate sets it to 1.0) when passing to
+        rank_source_candidates, and use cluster_segments with a candidate's
+        phashes to link it to the matching input timestamps. This is
+        content-based (no global search), so it needs no premium/hashtag.
         PERSIST job state to
         the clip2trace/jobs store (key = job_id): write the status on each step
         (created -> analyzing -> searching -> verifying -> ranking -> reporting ->
@@ -1526,6 +1633,7 @@ spec:
         - clip2trace/extract_segment_clues
         - clip2trace/cluster_segments
         - clip2trace/search_global_telegram_posts
+        - clip2trace/enumerate_channel_videos
         - clip2trace/fetch_telegram_candidate_media
         - clip2trace/verify_media_similarity
         - clip2trace/rank_source_candidates
@@ -2078,6 +2186,7 @@ spec:
         - { type: function, namespace: clip2trace, name: cluster_segments }
         - { type: function, namespace: clip2trace, name: generate_telegram_queries }
         - { type: function, namespace: clip2trace, name: search_global_telegram_posts }
+        - { type: function, namespace: clip2trace, name: enumerate_channel_videos }
         - { type: function, namespace: clip2trace, name: fetch_telegram_candidate_media }
         - { type: function, namespace: clip2trace, name: verify_media_similarity }
         - { type: function, namespace: clip2trace, name: rank_source_candidates }
