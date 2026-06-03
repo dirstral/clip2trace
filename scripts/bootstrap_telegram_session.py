@@ -8,9 +8,11 @@ A user account is required because channels.searchPosts is user-only (bots
 cannot do global search). Treat the session string like full account access:
 anyone with it can act as your account.
 
+Reads TELEGRAM_API_ID / TELEGRAM_API_HASH from the environment, or from a local
+`.env` file (gitignored) if they aren't already exported.
+
 Usage:
-    export TELEGRAM_API_ID=...        # from my.telegram.org
-    export TELEGRAM_API_HASH=...
+    # either export them, or put them in .env (TELEGRAM_API_ID=..., TELEGRAM_API_HASH=...)
     uv run python scripts/bootstrap_telegram_session.py
 
 You will be prompted for your phone number, the login code Telegram sends, and
@@ -23,7 +25,31 @@ import os
 import sys
 
 
+def _load_dotenv() -> None:
+    """Populate TELEGRAM_API_ID/HASH from repo-root .env if not already in env."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, ".env")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip().strip("'\"")
+                if key in (
+                    "TELEGRAM_API_ID",
+                    "TELEGRAM_API_HASH",
+                ) and not os.environ.get(key):
+                    os.environ[key] = val
+    except Exception:
+        pass
+
+
 def main() -> int:
+    _load_dotenv()
     api_id = os.environ.get("TELEGRAM_API_ID")
     api_hash = os.environ.get("TELEGRAM_API_HASH")
     if not api_id or not api_hash:
