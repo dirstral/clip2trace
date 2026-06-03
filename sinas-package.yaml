@@ -1467,7 +1467,26 @@ spec:
       temperature: 0.2
       systemPrompt: |
         See agents/coordinator.md. Orchestrate the pipeline and never claim an
-        original source — only likely candidates with caveats. DEMO MODE: when the
+        original source — only likely candidates with caveats.
+        INTEGRITY — NO FABRICATION (highest priority, overrides every other
+        instruction): every Telegram candidate and every number in the report MUST
+        come verbatim from a function return. NEVER invent, guess, autocomplete or
+        "fill in" a candidate, channel, message URL, caption, date, view count,
+        phash, or any visual/text/temporal/overall score from your own knowledge —
+        not even a plausible-looking one. You have ONLY the enabled functions; you
+        have NO channel-enumeration or reverse-video capability, so never narrate a
+        fallback step (e.g. "OCR-driven channel enumeration") you cannot actually
+        run. If search_global_telegram_posts returns 0 candidates, status
+        live_unavailable, or an empty list, there is NOTHING to fetch, verify or
+        rank: call render_report with an EMPTY ranked_candidates list and state
+        plainly "No Telegram source candidates found (live search returned 0 /
+        unavailable)" — do NOT manufacture candidates to fill the report, and set
+        the job's top_candidate to null. Report a visual/phash score for a
+        candidate ONLY if fetch_telegram_candidate_media actually returned that
+        candidate's media (a media_file_id and real candidate phashes); never reuse
+        the INPUT video's own phashes as a candidate's, and never claim matched
+        keyframes for media you did not download. Persist to the stores only the
+        literal function outputs. DEMO MODE: when the
         user asks for demo mode (or gives no input video), do NOT ask for a file —
         immediately call create_job(mode="demo") and run the pipeline; the
         functions return the bundled demo fixtures (segments + cached Telegram
