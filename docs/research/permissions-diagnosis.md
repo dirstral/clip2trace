@@ -8,8 +8,8 @@ _Date: 2026-06-02, updated 2026-06-03. Instance: via-10. Principal: `<redacted>`
 **API keys cannot execute or read package resources on via-10, regardless of
 their permissions. The blocker is a platform bug, not our configuration.** A
 freshly minted API key for the *same* admin user, with explicit
-`sinas.functions.execute:all` / `read:all` (the create response echoes them all
-as `true`), still gets:
+`sinas.functions.execute:all` and `sinas.functions.read:all` (the create
+response echoes them all as `true`), still gets:
 
 - `POST /functions/clip2trace/<name>/execute` → **403** "Not authorized to
   execute this function"
@@ -40,9 +40,10 @@ group/workspace).
 
 ## Definitive test (2026-06-03): explicit `execute:all` key still 403s
 
-Minted a new key for the same admin user **with** explicit permissions
-(`POST /api/v1/api-keys`, body `{"name":"clip2trace-exec","permissions":{...all
-:all...}}`). The create response (`201`) echoed every permission as `true`:
+Minted a new key for the same admin user **with** explicit permissions via
+`POST /api/v1/api-keys`, sending a `permissions` object that set each
+`sinas.<resource>.<action>:all` to `true`. The create response (`201`) echoed
+every permission as `true`:
 
 ```jsonc
 "permissions": {
