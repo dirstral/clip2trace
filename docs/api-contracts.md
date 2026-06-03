@@ -47,8 +47,12 @@ Out: `{status: "metadata_only|ok", candidates: [TelegramCandidate], downloaded,
 diagnostics[]?}`
 Dry-run (default) returns metadata only. A live download (`dry_run: false` +
 secrets + telethon) is bounded: per-file ≤ 8 MB, ≤ 5 files, ≤ 80 MB total
-(under the 100 MB /tmp limit). Sets `media_file_id` on success; marks
-`accessible: false` for private/deleted/inaccessible media (never fatal).
+(under the 100 MB /tmp limit). Sets `media_file_id` **and `phashes[]`** on
+success — the downloaded clip/image is decoded into full + center-crop
+perceptual hashes (#59) so `verify_media_similarity` has `candidate_phashes`
+(without them the visual score is always 0). Marks `accessible: false` for
+private/deleted/inaccessible media (never fatal); undecodable media keeps
+`phashes: []`.
 
 ## verify_media_similarity
 In: `{segment_phashes[], candidate_phashes[], segment_text?, candidate_text?}`

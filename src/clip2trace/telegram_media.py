@@ -33,6 +33,7 @@ def normalise_candidate(raw: Dict) -> Dict:
         "caption": raw.get("caption") or raw.get("message") or "",
         "has_media": bool(raw.get("has_media", raw.get("media"))),
         "media_file_id": raw.get("media_file_id"),
+        "phashes": list(raw.get("phashes") or []),
         "is_forward": bool(raw.get("is_forward", raw.get("fwd_from"))),
         "forward_origin": raw.get("forward_origin"),
         "source_query": raw.get("source_query"),
@@ -88,6 +89,16 @@ def fetch_candidate_media(
         try:
             file_id = live_client.download_media(cand, max_bytes=max_bytes)
             cand["media_file_id"] = file_id
+            # Compute candidate phashes so visual verification has input (the
+            # primary download_candidates path does the same).
+            try:
+                from clip2trace.video import phashes_for_media
+
+                ph = phashes_for_media(file_id) if file_id else []
+                if ph:
+                    cand["phashes"] = list(cand.get("phashes") or []) + ph
+            except Exception as exc:
+                diagnostics.append(f"phash failed for {cand['candidate_id']}: {exc!r}")
             downloaded += 1
         except Exception as exc:
             cand["accessible"] = False
