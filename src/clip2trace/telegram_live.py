@@ -322,9 +322,15 @@ class TelethonSearchClient:
                             diags.append(f"{channel}/{mid}: not found or deleted")
                             continue
                         size = getattr(getattr(msg, "file", None), "size", None)
-                        if not media_within_cap(size, max_bytes):
+                        # Skip BEFORE downloading. Unknown size (None) is skipped
+                        # too: download_media writes the whole file first, so an
+                        # unknown-but-large video would blow the 100 MB worker
+                        # /tmp mid-download (OSError 28) before any post-download
+                        # cap check can run. Enumerated candidates are videos,
+                        # which always report a size, so this drops nothing real.
+                        if size is None or not media_within_cap(size, max_bytes):
                             diags.append(
-                                f"{channel}/{mid}: {size} bytes over per-file cap"
+                                f"{channel}/{mid}: {size} bytes over cap / unknown; skipped"
                             )
                             continue
                         if size and spent + size > total_budget:
@@ -369,6 +375,16 @@ class TelethonSearchClient:
                                 cand["phashes"] = list(cand.get("phashes") or []) + ph
                         except Exception as exc:
                             diags.append(f"{channel}/{mid}: phash failed ({exc!r})")
+                        finally:
+                            # Free /tmp now: the media bytes aren't needed after
+                            # phashing (only the phashes are kept). Leaving them
+                            # accumulates across calls and exhausts the 100 MB
+                            # worker /tmp -> OSError 28. media_file_id stays set as
+                            # a marker that real media was fetched.
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
                         downloaded += 1
                         spent += actual
                     except FloodWaitError as exc:
