@@ -224,9 +224,10 @@ def main() -> int:
         print("RESULT: token looks healthy — package functions should execute.")
         return 0
     print(
-        "RESULT: token is restricted (see FAILs above). "
-        "Mint a new key with permissions: {} (inherit) or explicit perms "
-        "per docs/research/permissions-diagnosis.md."
+        "RESULT: token cannot execute (see FAILs above). NOTE: on via-10, API "
+        "keys cannot clear the resource-auth gate even with execute:all — "
+        "authenticate with a JWT instead (POST /auth/login -> access_token, "
+        "refresh via /auth/refresh). See docs/research/permissions-diagnosis.md."
     )
     return 1
 
