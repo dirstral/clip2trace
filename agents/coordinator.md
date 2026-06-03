@@ -83,12 +83,23 @@ Functions return data only; **you** hold the store access and persist it. (Funct
 default runtime base URL `host.docker.internal:8000` using `requests` + their
 per-execution `access_token`; there is no preinstalled `sinas` SDK — but state
 persistence is kept agent-layer on purpose to keep functions stateless.)
+All four stores are **mandatory** — the job is not `done` until each is written
+for this `job_id`. Key every store by `job_id` and store the **full data**, not a
+summary:
 - **clip2trace/jobs** (key = `job_id`): write the job record and update `status`
   on each step — `created → analyzing → searching → verifying → ranking →
   reporting → done`; on failure set `status=failed` with the error.
-- **clip2trace/segments**: candidate segments + clues.
-- **clip2trace/search-results**: retrieved Telegram candidates.
-- **clip2trace/candidate-matches**: per-candidate media-similarity results.
+- **clip2trace/segments**: the **full array** of segment objects (each
+  `{segment_id, start_sec, end_sec, phashes, ocr_text, visible_handles}`) — the
+  list itself, not a count or a single dict.
+- **clip2trace/search-results**: the candidates **array after fetch**, including
+  each candidate's `media_file_id` + `phashes` once downloaded (not just bare
+  enumeration).
+- **clip2trace/candidate-matches**: **required before rendering** — the array of
+  every per-candidate verify result (`{candidate_id, visual_score, text_score,
+  temporal_score, overall_score, matched_frames, linked_segments}`). Write it even
+  when empty. A report whose scores aren't persisted here is incomplete and can't
+  be audited.
 The dashboard and async polling read these stores, so keep them current.
 
 ## Output
