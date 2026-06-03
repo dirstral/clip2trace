@@ -312,3 +312,64 @@ def center_crop_phash(frame, hash_size: int = 8, crop: float = 0.6) -> Optional[
     y0, x0 = (h - ch) // 2, (w - cw) // 2
     cropped = frame[y0 : y0 + ch, x0 : x0 + cw]
     return str(imagehash.phash(Image.fromarray(cropped), hash_size=hash_size))
+
+
+def _media_duration_sec(path: str) -> Optional[float]:
+    """Best-effort duration of a media file via PyAV, or None if unknown."""
+    try:
+        import av  # type: ignore
+
+        container = av.open(path)
+        try:
+            if container.duration:
+                # container.duration is in av.time_base (microseconds).
+                return float(container.duration) / 1_000_000.0
+            stream = container.streams.video[0]
+            if stream.duration and stream.time_base:
+                return float(stream.duration * stream.time_base)
+        finally:
+            container.close()
+    except Exception:
+        return None
+    return None
+
+
+def phashes_for_media(path: str, n: int = 3) -> List[str]:
+    """Full + center-crop perceptual hashes for a downloaded candidate media file.
+
+    Handles both video (decode up to `n` keyframes across the clip) and image
+    (hash the single frame) media, using the same pip-only path as the input
+    video. Returns hex hash strings; an empty list if the file can't be decoded
+    or hashed. Never raises — undecodable candidate media must not break the
+    fetch step (the candidate just keeps `phashes: []`).
+
+    This is the bridge between the bounded media download and
+    `verify_media_similarity`: without it, live candidates carry no phashes and
+    the visual-similarity score (40% of the rubric) is always 0.
+    """
+    out: List[str] = []
+    # Try as video first. Default to a short window when duration is unknown —
+    # Telegram clips are short and bounded to a few MB.
+    try:
+        duration = _media_duration_sec(path) or 6.0
+        for frame in extract_keyframes(path, 0.0, duration, n):
+            for h in (phash_of_frame(frame), center_crop_phash(frame)):
+                if h:
+                    out.append(h)
+    except Exception:
+        pass
+    if out:
+        return out
+    # Fall back to treating it as a still image.
+    try:
+        import numpy as np  # type: ignore
+        from PIL import Image  # type: ignore
+
+        with Image.open(path) as im:
+            arr = np.asarray(im.convert("RGB"))
+        for h in (phash_of_frame(arr), center_crop_phash(arr)):
+            if h:
+                out.append(h)
+    except Exception:
+        pass
+    return out

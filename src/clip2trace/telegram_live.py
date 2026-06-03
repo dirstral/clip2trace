@@ -287,6 +287,17 @@ class TelethonSearchClient:
                             diags.append("tmp byte budget reached; stopping downloads")
                             break
                         cand["media_file_id"] = path
+                        # Bridge to visual verification: decode the downloaded
+                        # clip into perceptual hashes now, else candidate_phashes
+                        # is empty downstream and visual_similarity is always 0.
+                        try:
+                            from .video import phashes_for_media
+
+                            ph = phashes_for_media(path)
+                            if ph:
+                                cand["phashes"] = list(cand.get("phashes") or []) + ph
+                        except Exception as exc:
+                            diags.append(f"{channel}/{mid}: phash failed ({exc!r})")
                         downloaded += 1
                         spent += actual
                     except FloodWaitError as exc:

@@ -1087,6 +1087,7 @@ spec:
                         "caption": c.get("caption", ""),
                         "has_media": bool(c.get("has_media")),
                         "media_file_id": c.get("media_file_id"),
+                        "phashes": list(c.get("phashes") or []),
                         "accessible": c.get("accessible", True)}
 
             out = [_norm(c) for c in cands]
@@ -1117,6 +1118,64 @@ spec:
                             "FileIdInvalidError", "LocationInvalidError",
                             "UsernameInvalidError", "UsernameNotOccupiedError")
             downloaded, spent, diags = 0, 0, []
+
+            def _phashes_for_media(p):
+                # Decode a downloaded candidate clip/image into perceptual hashes
+                # (PyAV keyframes, else still image), so verify_media_similarity
+                # has candidate phashes — else visual_similarity is always 0.
+                hashes = []
+                try:
+                    import imagehash
+                    from PIL import Image
+                except Exception:
+                    return hashes
+                frames = []
+                try:
+                    import av
+                    c = av.open(p)
+                    try:
+                        dur = (float(c.duration) / 1000000.0) if c.duration else 6.0
+                        s = c.streams.video[0]
+                        tb = s.time_base
+                        n = 3
+                        step = dur / (n + 1)
+                        for i in range(1, n + 1):
+                            t = step * i
+                            try:
+                                c.seek(int(t / tb), stream=s, backward=True)
+                            except Exception:
+                                pass
+                            picked = None
+                            for fr in c.decode(s):
+                                picked = fr
+                                ft = float(fr.pts * tb) if fr.pts is not None else t
+                                if ft >= t:
+                                    break
+                            if picked is not None:
+                                frames.append(picked.to_ndarray(format="rgb24"))
+                    finally:
+                        c.close()
+                except Exception:
+                    pass
+                if not frames:
+                    try:
+                        import numpy as np
+                        with Image.open(p) as im:
+                            frames = [np.asarray(im.convert("RGB"))]
+                    except Exception:
+                        frames = []
+                for rgb in frames:
+                    try:
+                        hashes.append(str(imagehash.phash(Image.fromarray(rgb))))
+                        h, w = rgb.shape[:2]
+                        chh, cww = int(h * 0.6), int(w * 0.6)
+                        y0, x0 = (h - chh) // 2, (w - cww) // 2
+                        crop = rgb[y0:y0 + chh, x0:x0 + cww]
+                        hashes.append(str(imagehash.phash(Image.fromarray(crop))))
+                    except Exception:
+                        pass
+                return hashes
+
             try:
                 with TelegramClient(StringSession(session), int(api_id), api_hash) as client:
                     for cand in out:
@@ -1162,6 +1221,13 @@ spec:
                                 diags.append("tmp byte budget reached; stopping")
                                 break
                             cand["media_file_id"] = path
+                            try:
+                                ph = _phashes_for_media(path)
+                                if ph:
+                                    cand["phashes"] = list(
+                                        cand.get("phashes") or []) + ph
+                            except Exception as exc:
+                                diags.append("%s/%s: phash failed (%r)" % (ch, mid, exc))
                             downloaded += 1
                             spent += actual
                         except FloodWaitError as exc:

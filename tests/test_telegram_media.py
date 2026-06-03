@@ -304,3 +304,92 @@ def test_handler_live_without_secrets_metadata_only():
         {"secrets": {}},
     )
     assert out["status"] == "metadata_only"
+
+
+# --------------------------- #59: candidate-media phashes ---------------------------
+
+
+def _write_av_clip(path, av, np, frames=18, size=(64, 48), fps=10):
+    with av.open(path, mode="w") as c:
+        st = c.add_stream("mpeg4", rate=fps)
+        st.width, st.height, st.pix_fmt = size[0], size[1], "yuv420p"
+        for val in (40, 200):  # two scenes so there's content to hash
+            block = np.full((size[1], size[0], 3), val, dtype=np.uint8)
+            for _ in range(frames):
+                fr = av.VideoFrame.from_ndarray(block, format="rgb24")
+                for p in st.encode(fr):
+                    c.mux(p)
+        for p in st.encode():
+            c.mux(p)
+
+
+def test_phashes_for_media_video(tmp_path):
+    av = pytest.importorskip("av")
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("imagehash")
+    from clip2trace.video import phashes_for_media
+
+    path = str(tmp_path / "clip.mp4")
+    _write_av_clip(path, av, np)
+    ph = phashes_for_media(path)
+    assert ph, "expected perceptual hashes from a decodable candidate clip"
+    assert all(int(h, 16) >= 0 for h in ph)  # valid hex hashes
+
+
+def test_phashes_for_media_image(tmp_path):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("imagehash")
+    Image = pytest.importorskip("PIL.Image")
+    from clip2trace.video import phashes_for_media
+
+    path = str(tmp_path / "still.png")
+    Image.fromarray(np.full((48, 64, 3), 120, dtype=np.uint8)).save(path)
+    assert phashes_for_media(path), "expected a phash from a still image candidate"
+
+
+def test_phashes_for_media_undecodable_is_empty(tmp_path):
+    from clip2trace.video import phashes_for_media
+
+    path = str(tmp_path / "notmedia.bin")
+    with open(path, "wb") as fh:
+        fh.write(b"this is not media")
+    assert phashes_for_media(path) == []  # graceful, never raises
+
+
+class _VideoDLClient:
+    """Fake telethon client that 'downloads' a real video clip (for phash test)."""
+
+    def __init__(self, src_mp4):
+        self.src = src_mp4
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get_messages(self, channel, ids):
+        return pytypes.SimpleNamespace(
+            file=pytypes.SimpleNamespace(size=2000), _mid=ids
+        )
+
+    def download_media(self, msg, file=None):
+        import shutil
+
+        dst = os.path.join(file, "cand.mp4")
+        shutil.copy(self.src, dst)
+        return dst
+
+
+def test_download_candidates_attaches_phashes(flood_error, tmp_path):
+    # The decisive #59 path: a downloaded candidate clip gets perceptual hashes,
+    # so verify_media_similarity has candidate_phashes (else visual score is 0).
+    av = pytest.importorskip("av")
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("imagehash")
+    src = str(tmp_path / "src.mp4")
+    _write_av_clip(src, av, np)
+    sc = TelethonSearchClient(lambda: _VideoDLClient(src))
+    res = sc.download_candidates(_cands(10), dest_dir=str(tmp_path))
+    assert res["downloaded"] == 1
+    assert res["candidates"][0].get("phashes"), "candidate should carry phashes"
