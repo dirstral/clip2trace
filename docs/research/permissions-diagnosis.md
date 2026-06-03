@@ -3,42 +3,68 @@
 _Date: 2026-06-02, updated 2026-06-03. Instance: via-10. Principal: `<redacted>`
 (role `Admins`). Reproducer: `scripts/diagnose_permissions.py`._
 
-## TL;DR (FINAL — 2026-06-03)
+## RESOLVED (2026-06-03): API keys work — grant *wildcard* permissions
 
-**API keys cannot execute or read package resources on via-10, regardless of
-their permissions. The blocker is a platform bug, not our configuration.** A
-freshly minted API key for the *same* admin user, with explicit
-`sinas.functions.execute:all` and `sinas.functions.read:all` (the create
-response echoes them all as `true`), still gets:
+**An API key CAN execute and read package resources — you must grant it a
+wildcard-action permission (`sinas.<resource>.*:<scope>` or `sinas.*:<scope>`),
+not explicit per-action permissions.** The resource-authorization middleware
+only matches **wildcard** permission keys; explicit action keys like
+`sinas.functions.execute:all` pass `/auth/check-permissions` but are **silently
+ineffective** at the resource gate. That mismatch is what made the earlier keys
+"have execute:all (check ✓) yet 403".
 
-- `POST /functions/clip2trace/<name>/execute` → **403** "Not authorized to
-  execute this function"
-- `GET /api/v1/functions/clip2trace/<name>` → **403** "Not authorized to read
-  this resource"; `GET /api/v1/functions` → **`[]`**
-- `GET /api/v1/packages` → **403** "Not authorized to view packages"
+Measured on via-10 (same admin user, freshly minted keys, each tested with
+`POST /functions/clip2trace/create_job/execute`):
 
-…**while** `POST /auth/check-permissions` for the very same keys returns
-`has_permission: true`. So the **permission-check layer honors the key's
-`permissions`, but the resource-authorization middleware ignores them** — an
-API-key principal never clears the per-resource gate. The console works only
-because it uses the user's **JWT session**, which resolves authorization through
-the `Admins` role.
+| Key `permissions` | execute |
+|---|---|
+| `{ "sinas.*:all": true }` | **200** ✓ |
+| `{ "sinas.functions.*:all": true, "sinas.agents.*:all": true, … }` (resource wildcards) | **200** ✓ |
+| `{ "sinas.*:own": true }` | **200** ✓ |
+| `{ "sinas.functions.execute:all": true, "sinas.functions.read:all": true, … }` (explicit actions) | **403** ✗ |
 
-**Workaround (until the platform is fixed): authenticate with a JWT, not an API
-key.** `POST /auth/login` (email+password) → use the returned `access_token` as
-the bearer; refresh via `POST /auth/refresh {refresh_token}` (~15-min TTL). The
-console/dashboard already do this. **Real fix is operator/platform-side**: make
-resource-auth honor API-key permissions (or bind the key to the user's
-group/workspace).
+**Recommended least-privilege key for the clip2trace pipeline** (tested → 200,
+scoped to only the resources it needs — no roles/secrets/packages admin):
 
-> **Two earlier diagnoses were wrong and are kept below only as a trail.** PR #45
-> blamed the *key format* (`sinas.functions/<ns>/<name>.execute:own`) — wrong; the
-> grammar is `sinas.<resource>.<action>:<scope>`. The first correction (2026-06-02,
-> below) blamed *empty/stripped key permission overrides* and prescribed "mint a
-> key with explicit perms" — also wrong: a key with explicit `execute:all` still
-> 403s (see "Definitive test" next). The permissions were never the gate.
+```json
+{
+  "name": "clip2trace-dashboard",
+  "permissions": {
+    "sinas.functions.*:all":   true,
+    "sinas.agents.*:all":      true,
+    "sinas.collections.*:all": true,
+    "sinas.stores.*:all":      true,
+    "sinas.executions.*:all":  true,
+    "sinas.components.*:all":  true
+  }
+}
+```
+
+Mint it with `POST /api/v1/api-keys` from a principal that already has
+`api_keys.create` (e.g. an existing wildcard key, or the console session). Avoid
+`sinas.*:all` for a service key — it grants full admin (delete packages, read
+secrets, manage roles). The JWT path is no longer needed.
+
+**The remaining platform bug** (worth filing, see
+[`sinas-api-key-execute-bug-report.md`](sinas-api-key-execute-bug-report.md)) is
+the *inconsistency*: `/auth/check-permissions` honors explicit action
+permissions but the resource-auth middleware does not, so an explicit-perms key
+looks correct yet silently 403s.
+
+> **Trail of earlier (wrong) diagnoses, kept below for history.** PR #45 blamed
+> the *key format* (`sinas.functions/<ns>/<name>.execute:own`) — wrong; the
+> grammar is `sinas.<resource>.<action>:<scope>`. The 2026-06-02 correction
+> blamed *empty/stripped overrides* — wrong. The first 2026-06-03 reading
+> ("Definitive test", below) concluded API keys *cannot* execute at all — also
+> wrong: it only tested **explicit-action** keys, which fail; a **wildcard** key
+> works (table above).
 
 ## Definitive test (2026-06-03): explicit `execute:all` key still 403s
+
+> **Superseded** — see "RESOLVED" at the top. This test used **explicit-action**
+> permissions, which the resource gate ignores; a **wildcard** key works. The
+> evidence below is correct *for explicit-action keys* and explains the
+> check-permissions-vs-resource-auth mismatch.
 
 Minted a new key for the same admin user **with** explicit permissions via
 `POST /api/v1/api-keys`, sending a `permissions` object that set each
@@ -208,46 +234,46 @@ from user's groups)"** — when non-empty, those win over the role.)
 2. ~~**The token is the problem** (empty/stripped overrides).~~ Disproven — see
    "Definitive test": explicit `execute:all` does not help.
 3. ~~**The fix is to mint a key with `permissions: {}` or explicit perms.**~~
-   Disproven — no key configuration clears the resource gate; use a JWT.
+   Half-right: a key *can* clear the gate, but only with **wildcard** perms
+   (`sinas.<resource>.*:all`), not empty or explicit-action perms — see RESOLVED.
 4. **PR #45's source-level claim** about `core/permissions.matches_permission_pattern`
    was correct in spirit (the runtime does pattern-match) but **wrong in the
    specific format** it claimed. The pattern language is `<resource>.<action>:<scope>`,
    not `<resource>/<ns>/<name>.<action>:<scope>`. The author was probably
    looking at a log line that contained the resource id and misread the format.
 
-## Remediation (corrected 2026-06-03)
+## Remediation (the working recipe — 2026-06-03)
 
-Minting a key with empty *or* explicit permissions does **not** work — the
-resource-auth gate ignores key permissions either way (see "Definitive test").
-
-**Workaround that works today — use a JWT, not an API key.** The console and
-dashboard already do this; for scripts/back-ends:
+Mint the API key with **wildcard-action** permissions, then use it as a normal
+bearer token. `POST /api/v1/api-keys` (from the console session or an existing
+wildcard key) with the least-privilege set:
 
 ```bash
 U=https://via-10.sinas.wearebrain.com
-# 1. login -> access_token (+ refresh_token)
-curl -s -X POST "$U/auth/login" -H 'Content-Type: application/json' \
-  -d '{"email":"<you>","password":"<pw>"}'      # -> {access_token, refresh_token, expires_in, ...}
-# 2. use the access_token as the bearer for /functions/.../execute, /agents/.../chats, etc.
-# 3. it expires in ~15 min — refresh:
-curl -s -X POST "$U/auth/refresh" -H 'Content-Type: application/json' \
-  -d '{"refresh_token":"<refresh_token>"}'      # -> {access_token, ...}
+curl -s -X POST "$U/api/v1/api-keys" -H "Authorization: Bearer $ADMIN" \
+  -H 'Content-Type: application/json' -d '{
+    "name": "clip2trace-dashboard",
+    "permissions": {
+      "sinas.functions.*:all": true, "sinas.agents.*:all": true,
+      "sinas.collections.*:all": true, "sinas.stores.*:all": true,
+      "sinas.executions.*:all": true, "sinas.components.*:all": true
+    }
+  }'
+# response includes the raw key once — save it, then:
+SINAS_BASE_URL=https://via-10.sinas.wearebrain.com
+SINAS_ADMIN_TOKEN=<the new key>
 ```
 
-A JWT resolves authorization through the user's `Admins` role and clears the
-resource gate that API keys cannot.
+Verify: `python3 scripts/diagnose_permissions.py --token <new> --execute
+clip2trace/diagnose_runtime` → execute should return 200.
 
-**The real fix is operator/platform-side** (Sinas backend), one of:
+Do **not** use explicit-action permissions (`sinas.functions.execute:all`) — they
+pass `/auth/check-permissions` but the resource gate ignores them (403). Avoid
+`sinas.*:all` for a service key (full admin). The JWT path is no longer required.
 
-1. Make the resource-authorization middleware consult the API key's
-   `permissions` (today only `/auth/check-permissions` does), **or**
-2. Bind an API key to the creating user's group/workspace so resource
-   visibility/ownership resolves the same way the JWT's does.
-
-A ready-to-file write-up is in
-[`sinas-api-key-execute-bug-report.md`](sinas-api-key-execute-bug-report.md) —
-send it to the via-10 / Sinas operator. There is no client-side key
-configuration that unblocks it.
+**Still worth filing with the operator** (the underlying inconsistency): a
+ready-to-send write-up is in
+[`sinas-api-key-execute-bug-report.md`](sinas-api-key-execute-bug-report.md).
 
 ## Bonus finding: 307 HTTPS→HTTP downgrade on the Management API
 

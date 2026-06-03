@@ -224,10 +224,11 @@ def main() -> int:
         print("RESULT: token looks healthy — package functions should execute.")
         return 0
     print(
-        "RESULT: token cannot execute (see FAILs above). NOTE: on via-10, API "
-        "keys cannot clear the resource-auth gate even with execute:all — "
-        "authenticate with a JWT instead (POST /auth/login -> access_token, "
-        "refresh via /auth/refresh). See docs/research/permissions-diagnosis.md."
+        "RESULT: token cannot execute (see FAILs above). NOTE: on via-10 the "
+        "resource gate honors only WILDCARD permissions — mint the key with "
+        "sinas.<resource>.*:all (e.g. sinas.functions.*:all), NOT explicit "
+        "sinas.functions.execute:all (which passes check-permissions but 403s). "
+        "See docs/research/permissions-diagnosis.md."
     )
     return 1
 
