@@ -84,6 +84,16 @@ the same way. So: **permission-check ✓, resource-auth ✗** — conclusive tha
 resource-authorization middleware does not consult the API key's `permissions`.
 A JWT for the same user (the console session) is *not* subject to this and works.
 
+**Second data point — a console-created "select all" key.** A separate key
+created through the console's *Create API key* form with **"all" permissions
+selected** behaves differently from the API-minted one but fails just as hard:
+`check-permissions` for `sinas.functions.execute:all` / `read:all` returns
+**`false`** (so the console UI did *not* write the permission keys the runtime
+evaluates — a separate console-UI quirk), and `execute` is still **403**,
+`GET /api/v1/functions` still **`[]`**. Together the two keys bracket the bug:
+one *has* `execute:all` (check ✓) and 403s; the other lacks it via the console UI
+and 403s — **no API-key configuration, by either path, clears the resource gate.**
+
 ## What we measured (via-10, 2026-06-02) — superseded trail
 
 All commands are runnable via `scripts/diagnose_permissions.py`.
@@ -234,8 +244,10 @@ resource gate that API keys cannot.
 2. Bind an API key to the creating user's group/workspace so resource
    visibility/ownership resolves the same way the JWT's does.
 
-File this with the via-10 / Sinas operator with the "Definitive test" evidence
-above. There is no client-side key configuration that unblocks it.
+A ready-to-file write-up is in
+[`sinas-api-key-execute-bug-report.md`](sinas-api-key-execute-bug-report.md) —
+send it to the via-10 / Sinas operator. There is no client-side key
+configuration that unblocks it.
 
 ## Bonus finding: 307 HTTPS→HTTP downgrade on the Management API
 
