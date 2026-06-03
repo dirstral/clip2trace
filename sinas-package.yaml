@@ -1288,8 +1288,16 @@ spec:
                                 diags.append("%s/%s: not found or deleted" % (ch, mid))
                                 continue
                             size = getattr(getattr(msg, "file", None), "size", None)
-                            if size is not None and size > max_bytes:
-                                diags.append("%s/%s: over per-file cap" % (ch, mid))
+                            # Skip BEFORE downloading. Unknown size (None) is
+                            # skipped too: download_media writes the whole file
+                            # first, so an unknown-but-large video would blow the
+                            # 100 MB worker /tmp mid-download (OSError 28) before
+                            # the post-download cap check can run. Enumerated
+                            # candidates are videos (always sized), so this drops
+                            # nothing real.
+                            if size is None or size > max_bytes:
+                                diags.append("%s/%s: %r over cap / unknown; skipped"
+                                             % (ch, mid, size))
                                 continue
                             if size and spent + size > total_budget:
                                 diags.append("tmp byte budget reached; stopping")

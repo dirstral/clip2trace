@@ -164,8 +164,19 @@ def test_download_skips_over_cap(flood_error):
     sc = _client_with({10: _msg(10, 99_000_000)})  # over per-file cap
     res = sc.download_candidates(_cands(10))
     assert res["downloaded"] == 0
-    assert any("over per-file cap" in d for d in res["diagnostics"])
+    assert any("over cap" in d for d in res["diagnostics"])
     assert res["candidates"][0]["accessible"] is True  # skipped, not inaccessible
+
+
+def test_download_skips_unknown_size(flood_error, tmp_path):
+    """Unknown size (msg.file.size is None) is skipped BEFORE download — else a
+    large unknown-size video downloads in full and exhausts the worker /tmp
+    (OSError 28) before any post-download cap check can run."""
+    sc = _client_with({10: _msg(10, None)})  # file is None -> size unknown
+    res = sc.download_candidates(_cands(10), dest_dir=str(tmp_path))
+    assert res["downloaded"] == 0
+    assert any("unknown" in d.lower() for d in res["diagnostics"])
+    assert os.listdir(tmp_path) == []  # nothing was downloaded
 
 
 def test_download_deleted_marks_inaccessible(flood_error):
@@ -228,23 +239,14 @@ def test_download_respects_total_budget(flood_error, tmp_path):
     assert any("tmp byte budget" in d for d in res["diagnostics"])
 
 
-def test_download_unknown_size_enforces_budget(flood_error, tmp_path):
-    # size reported None (e.g. photos) but real bytes counted via os.path.getsize.
-    sc = _client_with({10: _msg(10, None, actual=60), 11: _msg(11, None, actual=60)})
+def test_download_enforces_total_budget(flood_error, tmp_path):
+    # Known sizes accumulate against the /tmp byte budget across a fetch.
+    sc = _client_with({10: _msg(10, 60), 11: _msg(11, 60)})
     res = sc.download_candidates(
         _cands(10, 11), total_budget=100, dest_dir=str(tmp_path)
     )
     assert res["downloaded"] == 1  # 2nd would push spent (60+60) over 100
     assert any("tmp byte budget" in d for d in res["diagnostics"])
-
-
-def test_download_unknown_size_over_cap_removed(flood_error, tmp_path):
-    # size None, but the downloaded file is over the per-file cap -> skipped + removed.
-    sc = _client_with({10: _msg(10, None, actual=200)})
-    res = sc.download_candidates(_cands(10), max_bytes=100, dest_dir=str(tmp_path))
-    assert res["downloaded"] == 0
-    assert any("over per-file cap" in d for d in res["diagnostics"])
-    assert list(tmp_path.iterdir()) == []  # cleaned up
 
 
 def test_download_skips_no_media_or_inaccessible(flood_error):
