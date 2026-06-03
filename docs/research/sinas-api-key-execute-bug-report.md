@@ -86,11 +86,16 @@ will 403 — but honoring exact actions is the more useful fix.)
 
 Grant the key **wildcard-action** permissions. Least-privilege set that works:
 
+Full `POST /api/v1/api-keys` request body (the wildcards go under `permissions`):
+
 ```json
 {
-  "sinas.functions.*:all": true, "sinas.agents.*:all": true,
-  "sinas.collections.*:all": true, "sinas.stores.*:all": true,
-  "sinas.executions.*:all": true, "sinas.components.*:all": true
+  "name": "clip2trace-dashboard",
+  "permissions": {
+    "sinas.functions.*:all": true, "sinas.agents.*:all": true,
+    "sinas.collections.*:all": true, "sinas.stores.*:all": true,
+    "sinas.executions.*:all": true, "sinas.components.*:all": true
+  }
 }
 ```
 
