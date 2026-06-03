@@ -70,10 +70,62 @@ def handler(input_data, context):
                 "diagnostics": [f"channel enumeration error: {exc!r}"],
             }
 
-    # 3. Demo mode with no cached data.
+    # 3. Demo mode: serve a pre-staged, pre-phashed channel corpus from the
+    # clip2trace/demo-fixtures collection (file: <channel>_corpus.json), so the
+    # channel pipeline can be demoed end-to-end with NO live Telegram calls and
+    # zero rate-limit risk. Reads via the files API (same path
+    # analyze_input_video uses to stage videos).
+    if channel:
+        import base64
+        import json as _json
+        import os
+        from urllib.parse import quote
+
+        token = context.get("access_token")
+        if token:
+            base = (
+                context.get("api_url")
+                or context.get("base_url")
+                or os.environ.get("SINAS_BASE_URL")
+                or "http://host.docker.internal:8000"
+            ).rstrip("/")
+            fname = "%s_corpus.json" % str(channel).lstrip("@")
+            try:
+                import requests
+
+                url = "%s/files/clip2trace/demo-fixtures/%s" % (
+                    base,
+                    quote(fname, safe=""),
+                )
+                resp = requests.get(
+                    url, timeout=30, headers={"Authorization": "Bearer %s" % token}
+                )
+                if resp.status_code == 200:
+                    b64 = (resp.json() or {}).get("content_base64")
+                    if b64:
+                        data = _json.loads(base64.b64decode(b64).decode("utf-8"))
+                        cands = (
+                            data.get("candidates") if isinstance(data, dict) else data
+                        ) or []
+                        if cands:
+                            return {
+                                "status": "ok",
+                                "source": "demo_fixture",
+                                "candidates": cands[:max_videos],
+                                "diagnostics": [],
+                            }
+            except Exception as exc:
+                return {
+                    "status": "demo_no_data",
+                    "source": "none",
+                    "candidates": [],
+                    "diagnostics": [f"demo fixture read failed: {exc!r}"],
+                }
+
+    # 4. Demo mode with no fixture / no cached data.
     return {
         "status": "demo_no_data",
         "source": "none",
         "candidates": [],
-        "diagnostics": ["demo mode and no cached_results supplied"],
+        "diagnostics": ["demo mode and no cached_results/fixture supplied"],
     }
