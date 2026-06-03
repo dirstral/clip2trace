@@ -1,24 +1,89 @@
-# Research log: permissions diagnosis (corrects PR #45)
+# Research log: permissions diagnosis (corrects PR #45, then itself)
 
-_Date: 2026-06-02. Instance: via-10. Principal: `<redacted>` (role `Admins`).
-Reproducer: `scripts/diagnose_permissions.py`._
+_Date: 2026-06-02, updated 2026-06-03. Instance: via-10. Principal: `<redacted>`
+(role `Admins`). Reproducer: `scripts/diagnose_permissions.py`._
 
-## TL;DR
+## TL;DR (FINAL — 2026-06-03)
 
-The PR #45 diagnosis of #44 ("API tokens need namespaced permission keys like
-`sinas.functions/<ns>/<name>.execute:own`") is **wrong about the key format**.
-The authoritative permission key grammar is **`sinas.<resource>.<action>:<scope>`**
-(`<resource>` snake_case plural, `<scope>` `:own` or `:all`); namespace is metadata
-used to scope `:own` queries, **not a substring of the key**.
+**API keys cannot execute or read package resources on via-10, regardless of
+their permissions. The blocker is a platform bug, not our configuration.** A
+freshly minted API key for the *same* admin user, with explicit
+`sinas.functions.execute:all` / `read:all` (the create response echoes them all
+as `true`), still gets:
 
-The actual root cause on via-10 is that the API token we were using has
-**explicit permission overrides** that strip almost every write/admin capability.
-The console works because it uses the user's JWT session (which inherits the
-`Admins` role), not this restricted token. The fix is operator-side and trivial:
-mint a new API key with `permissions: {}` (empty → inherit from user's groups) or
-with explicit perms for the resources we need.
+- `POST /functions/clip2trace/<name>/execute` → **403** "Not authorized to
+  execute this function"
+- `GET /api/v1/functions/clip2trace/<name>` → **403** "Not authorized to read
+  this resource"; `GET /api/v1/functions` → **`[]`**
+- `GET /api/v1/packages` → **403** "Not authorized to view packages"
 
-## What we measured (via-10, 2026-06-02)
+…**while** `POST /auth/check-permissions` for the very same keys returns
+`has_permission: true`. So the **permission-check layer honors the key's
+`permissions`, but the resource-authorization middleware ignores them** — an
+API-key principal never clears the per-resource gate. The console works only
+because it uses the user's **JWT session**, which resolves authorization through
+the `Admins` role.
+
+**Workaround (until the platform is fixed): authenticate with a JWT, not an API
+key.** `POST /auth/login` (email+password) → use the returned `access_token` as
+the bearer; refresh via `POST /auth/refresh {refresh_token}` (~15-min TTL). The
+console/dashboard already do this. **Real fix is operator/platform-side**: make
+resource-auth honor API-key permissions (or bind the key to the user's
+group/workspace).
+
+> **Two earlier diagnoses were wrong and are kept below only as a trail.** PR #45
+> blamed the *key format* (`sinas.functions/<ns>/<name>.execute:own`) — wrong; the
+> grammar is `sinas.<resource>.<action>:<scope>`. The first correction (2026-06-02,
+> below) blamed *empty/stripped key permission overrides* and prescribed "mint a
+> key with explicit perms" — also wrong: a key with explicit `execute:all` still
+> 403s (see "Definitive test" next). The permissions were never the gate.
+
+## Definitive test (2026-06-03): explicit `execute:all` key still 403s
+
+Minted a new key for the same admin user **with** explicit permissions
+(`POST /api/v1/api-keys`, body `{"name":"clip2trace-exec","permissions":{...all
+:all...}}`). The create response (`201`) echoed every permission as `true`:
+
+```jsonc
+"permissions": {
+  "sinas.functions.execute:all": true, "sinas.functions.read:all": true,
+  "sinas.agents.chat:all": true, "sinas.collections.upload:all": true,
+  "sinas.stores.write_state:all": true, "sinas.executions.read:all": true, ...
+}
+```
+
+Then, using that key as the bearer:
+
+```bash
+K=<new key>;  U=https://via-10.sinas.wearebrain.com
+
+# 1. The permission CHECK says yes:
+curl -s -X POST "$U/auth/check-permissions" -H "Authorization: Bearer $K" \
+  -H 'Content-Type: application/json' \
+  -d '{"permissions":["sinas.functions.execute:all"],"logic":"OR"}'
+# → {"result":true,"checks":[{"permission":"sinas.functions.execute:all","has_permission":true}]}
+#   (read:all and execute:own also → true)
+
+# 2. …but every actual resource access is denied:
+curl -s "$U/api/v1/functions"               -H "Authorization: Bearer $K"   # → []
+curl -s "$U/api/v1/functions/clip2trace/create_job" -H "Authorization: Bearer $K"
+# → 403 {"detail":"Not authorized to read this resource"}
+curl -s "$U/api/v1/packages"                -H "Authorization: Bearer $K"
+# → 403 {"detail":"Not authorized to view packages"}
+curl -s -X POST "$U/functions/clip2trace/create_job/execute" \
+  -H "Authorization: Bearer $K" -H 'Content-Type: application/json' \
+  -d '{"input":{"mode":"demo"}}'
+# → 403 {"detail":"Not authorized to execute this function"}
+```
+
+`/auth/me` on the key confirms it is the **same** principal id `149a05fb-…` with
+`roles:["Admins"]`. The component-proxy path
+(`POST /components/clip2trace/dashboard/proxy/functions/.../execute`) is denied
+the same way. So: **permission-check ✓, resource-auth ✗** — conclusive that the
+resource-authorization middleware does not consult the API key's `permissions`.
+A JWT for the same user (the console session) is *not* subject to this and works.
+
+## What we measured (via-10, 2026-06-02) — superseded trail
 
 All commands are runnable via `scripts/diagnose_permissions.py`.
 
@@ -119,71 +184,57 @@ per-key permission overrides** are. (Schema confirms: `APIKeyCreate.permissions`
 is a `dict[str, bool]` described as **"Permission overrides (empty = inherit
 from user's groups)"** — when non-empty, those win over the role.)
 
-## What this means for #44
+## What this means for #44 (interim — superseded by the 2026-06-03 TL;DR)
 
-1. **The platform is fine.** The package installed cleanly, the function exists,
-   the runtime knows the installer's `owner_user_id`, and the 403 is
-   *descriptive* (it names the function). Nothing is broken in the package or
-   the install.
-2. **The token is the problem.** It was created with explicit overrides that
-   don't include function-execute (or api-key-create, or roles/llm/packages
-   read). The user is admin; the token is not.
-3. **The fix is one console action.** An admin mints a new API key with
-   `permissions: {}` (inherit) — or, for least-privilege, with explicit perms
-   matching the dashboard/SDK's needs. That new key will execute package
-   functions because it inherits `sinas.functions.execute:own` (the `Admins`
-   role grants it; install sets the user as owner).
+> The 2026-06-02 reading below assumed the **old** key's empty/stripped
+> permissions were the gate. The 2026-06-03 "Definitive test" disproves that: a
+> key with explicit `execute:all` still 403s. Keep this only as context; the real
+> cause is the resource-auth middleware ignoring key permissions entirely.
+
+1. **The platform install is fine.** The package installed cleanly, the function
+   exists, and the 403 is *descriptive* (it names the function). Nothing is
+   broken in the package or the install.
+2. ~~**The token is the problem** (empty/stripped overrides).~~ Disproven — see
+   "Definitive test": explicit `execute:all` does not help.
+3. ~~**The fix is to mint a key with `permissions: {}` or explicit perms.**~~
+   Disproven — no key configuration clears the resource gate; use a JWT.
 4. **PR #45's source-level claim** about `core/permissions.matches_permission_pattern`
    was correct in spirit (the runtime does pattern-match) but **wrong in the
    specific format** it claimed. The pattern language is `<resource>.<action>:<scope>`,
    not `<resource>/<ns>/<name>.<action>:<scope>`. The author was probably
    looking at a log line that contained the resource id and misread the format.
 
-## Operator-side remediation (the actual fix)
+## Remediation (corrected 2026-06-03)
 
-From the Sinas management console as an admin user:
+Minting a key with empty *or* explicit permissions does **not** work — the
+resource-auth gate ignores key permissions either way (see "Definitive test").
 
-1. **Settings → API keys → Create API key** (or `POST /api/v1/api-keys`).
-2. Name: e.g. `clip2trace-dashboard`.
-3. **Permissions: leave empty** (inherits from the user's `Admins` role) —
-   this is the simplest correct option.
-4. Expiry: pick a date.
-5. Save the returned key **once** (the platform shows it only at creation).
+**Workaround that works today — use a JWT, not an API key.** The console and
+dashboard already do this; for scripts/back-ends:
 
-Then in the dashboard's env (or `.env`), set:
 ```bash
-SINAS_BASE_URL=https://via-10.sinas.wearebrain.com
-SINAS_ADMIN_TOKEN=<the new key>
+U=https://via-10.sinas.wearebrain.com
+# 1. login -> access_token (+ refresh_token)
+curl -s -X POST "$U/auth/login" -H 'Content-Type: application/json' \
+  -d '{"email":"<you>","password":"<pw>"}'      # -> {access_token, refresh_token, expires_in, ...}
+# 2. use the access_token as the bearer for /functions/.../execute, /agents/.../chats, etc.
+# 3. it expires in ~15 min — refresh:
+curl -s -X POST "$U/auth/refresh" -H 'Content-Type: application/json' \
+  -d '{"refresh_token":"<refresh_token>"}'      # -> {access_token, ...}
 ```
 
-Re-run the pipeline. The 403 is gone.
+A JWT resolves authorization through the user's `Admins` role and clears the
+resource gate that API keys cannot.
 
-**Least-privilege alternative** (if you want the dashboard token to NOT
-inherit Admin): pass explicit `permissions`:
+**The real fix is operator/platform-side** (Sinas backend), one of:
 
-```json
-{
-  "name": "clip2trace-dashboard",
-  "permissions": {
-    "sinas.functions.execute:own":         true,
-    "sinas.functions.read:own":            true,
-    "sinas.agents.chat:own":               true,
-    "sinas.agents.read:own":               true,
-    "sinas.collections.upload:own":        true,
-    "sinas.collections.read:own":          true,
-    "sinas.collections.download:own":      true,
-    "sinas.collections.list:own":          true,
-    "sinas.collections.delete_files:own":  true,
-    "sinas.stores.write_state:own":        true,
-    "sinas.stores.read_state:own":         true,
-    "sinas.executions.read:own":           true,
-    "sinas.query_templates.render:own":    true
-  }
-}
-```
+1. Make the resource-authorization middleware consult the API key's
+   `permissions` (today only `/auth/check-permissions` does), **or**
+2. Bind an API key to the creating user's group/workspace so resource
+   visibility/ownership resolves the same way the JWT's does.
 
-(Mint it from a token that *does* have `sinas.api_keys.create` — an admin
-JWT, the console, or a broader "service" token kept in a secret store.)
+File this with the via-10 / Sinas operator with the "Definitive test" evidence
+above. There is no client-side key configuration that unblocks it.
 
 ## Bonus finding: 307 HTTPS→HTTP downgrade on the Management API
 
