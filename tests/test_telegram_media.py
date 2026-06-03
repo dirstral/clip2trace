@@ -146,6 +146,20 @@ def test_download_success(flood_error, tmp_path):
     assert all(c["accessible"] for c in res["candidates"])
 
 
+def test_download_cleans_up_tmp_after_phash(flood_error, tmp_path):
+    """Downloaded media is deleted right after phashing so the worker's 100 MB
+    /tmp does not fill across calls (the real cause of OSError 28 / 'No space
+    left on device'). media_file_id stays set as a marker that media was
+    fetched, and the phashes are retained."""
+    sc = _client_with({10: _msg(10, 1000), 11: _msg(11, 2000)})
+    res = sc.download_candidates(_cands(10, 11), dest_dir=str(tmp_path))
+    assert res["downloaded"] == 2
+    paths = [c["media_file_id"] for c in res["candidates"]]
+    assert paths == [str(tmp_path / "10.bin"), str(tmp_path / "11.bin")]  # marker kept
+    assert not any(os.path.exists(p) for p in paths)  # bytes freed
+    assert os.listdir(tmp_path) == []  # no leftover media in the dir
+
+
 def test_download_skips_over_cap(flood_error):
     sc = _client_with({10: _msg(10, 99_000_000)})  # over per-file cap
     res = sc.download_candidates(_cands(10))

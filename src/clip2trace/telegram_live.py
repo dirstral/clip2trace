@@ -369,6 +369,16 @@ class TelethonSearchClient:
                                 cand["phashes"] = list(cand.get("phashes") or []) + ph
                         except Exception as exc:
                             diags.append(f"{channel}/{mid}: phash failed ({exc!r})")
+                        finally:
+                            # Free /tmp now: the media bytes aren't needed after
+                            # phashing (only the phashes are kept). Leaving them
+                            # accumulates across calls and exhausts the 100 MB
+                            # worker /tmp -> OSError 28. media_file_id stays set as
+                            # a marker that real media was fetched.
+                            try:
+                                os.remove(path)
+                            except OSError:
+                                pass
                         downloaded += 1
                         spent += actual
                     except FloodWaitError as exc:
