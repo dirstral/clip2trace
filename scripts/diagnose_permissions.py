@@ -17,7 +17,8 @@ Usage:
     python3 scripts/diagnose_permissions.py --execute clip2trace/diagnose_runtime
 
 Exit codes:
-    0  all checks pass (token is healthy — can execute package functions)
+    0  all checks pass (with --execute: execution verified; without it, only
+       /auth/check-permissions passed — which does NOT guarantee execution)
     1  at least one check failed (token is restricted or instance unreachable)
     2  usage / config error
 """
@@ -221,13 +222,22 @@ def main() -> int:
 
     print()
     if all_ok:
-        print("RESULT: token looks healthy — package functions should execute.")
+        if args.execute:
+            print("RESULT: token can execute — verified by the live --execute call.")
+        else:
+            print(
+                "RESULT: check-permissions passed, but that does NOT guarantee "
+                "execution on via-10: explicit-action keys pass the check yet 403 "
+                "at the resource gate (only wildcard perms clear it). Re-run with "
+                "--execute clip2trace/diagnose_runtime to confirm the real call."
+            )
         return 0
     print(
-        "RESULT: token cannot execute (see FAILs above). NOTE: on via-10, API "
-        "keys cannot clear the resource-auth gate even with execute:all — "
-        "authenticate with a JWT instead (POST /auth/login -> access_token, "
-        "refresh via /auth/refresh). See docs/research/permissions-diagnosis.md."
+        "RESULT: token cannot execute (see FAILs above). NOTE: on via-10 the "
+        "resource gate honors only WILDCARD permissions — mint the key with "
+        "sinas.<resource>.*:all (e.g. sinas.functions.*:all), NOT explicit "
+        "sinas.functions.execute:all (which passes check-permissions but 403s). "
+        "See docs/research/permissions-diagnosis.md."
     )
     return 1
 
