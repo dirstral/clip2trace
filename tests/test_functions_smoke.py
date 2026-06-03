@@ -23,6 +23,7 @@ FUNCTION_FILES = [
     "cluster_segments",
     "generate_telegram_queries",
     "search_global_telegram_posts",
+    "enumerate_channel_videos",
     "fetch_telegram_candidate_media",
     "verify_media_similarity",
     "rank_source_candidates",
@@ -43,6 +44,7 @@ MINIMAL_INPUT = {
     },
     "generate_telegram_queries": {"visible_handles": ["demo_channel"]},
     "search_global_telegram_posts": {"mode": "demo"},
+    "enumerate_channel_videos": {"channel": "demo", "mode": "demo"},
     "fetch_telegram_candidate_media": {"candidates": []},
     "verify_media_similarity": {
         "segment_phashes": ["c3e1"],

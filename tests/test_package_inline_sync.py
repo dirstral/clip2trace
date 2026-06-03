@@ -28,6 +28,7 @@ MINIMAL_INPUT = {
     },
     "generate_telegram_queries": {"visible_handles": ["demo_channel"]},
     "search_global_telegram_posts": {"mode": "demo"},
+    "enumerate_channel_videos": {"channel": "demo", "mode": "demo"},
     "fetch_telegram_candidate_media": {"candidates": []},
     "verify_media_similarity": {
         "segment_phashes": ["c3e1"],

@@ -30,6 +30,12 @@ MAX_MEDIA = 5
 MAX_MEDIA_BYTES = 8_000_000  # per-file cap
 MAX_TMP_BUDGET = 80_000_000  # total bytes across a fetch (under 100 MB /tmp)
 
+# Channel enumeration: how many recent messages to scan, and what counts as a
+# video. Telegram posts `.mkv` as a *document*, not a streamable video message,
+# so a video-only filter misses them — match on mime/extension too.
+CHANNEL_SCAN_LIMIT = 300
+VIDEO_EXTS = (".mkv", ".mp4", ".mov", ".webm", ".avi", ".m4v")
+
 # Telethon error class names that mean "this media is inaccessible — skip it".
 # Matched by class name so we don't hard-import telethon here.
 INACCESSIBLE_ERROR_NAMES = frozenset(
@@ -122,6 +128,26 @@ def normalize_message(
     }
 
 
+def is_video_like_msg(msg) -> bool:
+    """True for a video message OR a document that is video by mime/extension.
+
+    Telegram posts `.mkv` as a *document*, not a streamable video message, so a
+    video-only filter misses them — match on mime type / file extension too.
+    Tolerant of missing attributes; never raises.
+    """
+    if getattr(msg, "video", None) is not None:
+        return True
+    f = getattr(msg, "file", None)
+    if f is None:
+        return False
+    mime = (getattr(f, "mime_type", None) or "").lower()
+    if mime.startswith("video/"):
+        return True
+    name = (getattr(f, "name", None) or "").lower()
+    ext = (getattr(f, "ext", None) or "").lower()
+    return name.endswith(VIDEO_EXTS) or ext in VIDEO_EXTS
+
+
 def accumulate(
     pages: Iterable[List[Dict]], max_results: int = MAX_RESULTS_PER_QUERY
 ) -> List[Dict]:
@@ -206,6 +232,51 @@ class TelethonSearchClient:
                         continue
                     seen.add(cand["candidate_id"])
                     results.append(cand)
+        return results
+
+    def enumerate_channel(
+        self,
+        channel: str,
+        *,
+        max_videos: int = 10,
+        scan_limit: int = CHANNEL_SCAN_LIMIT,
+    ) -> List[Dict]:
+        """List a channel's video posts as candidate dicts (channel-scoped mode).
+
+        Scans up to `scan_limit` recent messages with NO server-side filter (so
+        video *documents* like .mkv are included, not only streamable video
+        messages) and returns up to `max_videos` video-like candidates in the
+        same shape as `search`. Each carries `channel_relevance=1.0` (it is, by
+        construction, from the chosen channel) and `source_query="channel:<name>"`.
+        Never raises — enumeration failure is recorded in `diagnostics`.
+        """
+        results: List[Dict] = []
+        try:
+            with self._connector() as client:
+                entity = client.get_entity(channel)
+                username = getattr(entity, "username", None)
+                source_q = "channel:%s" % (username or channel)
+                for msg in client.iter_messages(entity, limit=scan_limit):
+                    if len(results) >= max_videos:
+                        break
+                    if getattr(msg, "media", None) is None or not is_video_like_msg(
+                        msg
+                    ):
+                        continue
+                    # normalize_message can't resolve the channel from a single
+                    # entity (no chats index), so fill channel/url/id from it.
+                    cand = normalize_message(msg, {}, source_q)
+                    mid = cand.get("message_id")
+                    if username:
+                        cand["channel"] = username
+                        cand["candidate_id"] = "%s_%s" % (username, mid)
+                        cand["url"] = (
+                            "https://t.me/%s/%s" % (username, mid) if mid else None
+                        )
+                    cand["channel_relevance"] = 1.0
+                    results.append(cand)
+        except Exception as exc:  # never crash the pipeline
+            self.diagnostics.append("channel enumerate failed %r: %r" % (channel, exc))
         return results
 
     def download_candidates(
