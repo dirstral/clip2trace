@@ -1619,14 +1619,26 @@ spec:
         rank_source_candidates, and use cluster_segments with a candidate's
         phashes to link it to the matching input timestamps. This is
         content-based (no global search), so it needs no premium/hashtag.
-        PERSIST job state to
-        the clip2trace/jobs store (key = job_id): write the status on each step
-        (created -> analyzing -> searching -> verifying -> ranking -> reporting ->
-        done), and on failure set status=failed with the error message. Persist
-        segments to clip2trace/segments, search hits to clip2trace/search-results,
-        and media matches to clip2trace/candidate-matches as they are produced.
-        (Functions are pure transforms — they return data; you hold the store
-        access and are responsible for persistence.)
+        PERSIST (MANDATORY — the job is NOT done until all four stores are
+        written for this job_id; functions are pure transforms, you hold the store
+        access). Use job_id as the key in every store and write the FULL data, not
+        a summary:
+        - clip2trace/jobs[job_id]: the job record; update status on each step
+          (created -> analyzing -> searching -> verifying -> ranking -> reporting
+          -> done), and on failure set status=failed with the error message.
+        - clip2trace/segments[job_id]: the FULL ARRAY of segment objects (each
+          {segment_id, start_sec, end_sec, phashes, ocr_text, visible_handles}) —
+          store the list itself, NOT a count or a single dict.
+        - clip2trace/search-results[job_id]: the candidates ARRAY after fetch —
+          include each candidate's media_file_id and phashes once downloaded, so
+          the retrieved+fetched evidence is captured (not just bare enumeration).
+        - clip2trace/candidate-matches[job_id]: REQUIRED before you render — the
+          ARRAY of every per-candidate verify result you computed
+          ({candidate_id, visual_score, text_score, temporal_score,
+          overall_score, matched_frames, linked_segments}). Write it even when the
+          array is empty (0 candidates / none fetched). Never skip this store: a
+          report whose scores are not persisted to candidate-matches is incomplete
+          and cannot be audited.
       enabledFunctions:
         - clip2trace/create_job
         - clip2trace/analyze_input_video
