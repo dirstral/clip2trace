@@ -1161,6 +1161,9 @@ spec:
         properties:
           candidates: { type: array, items: { type: object } }
           dry_run: { type: boolean, default: true }
+          max_media: { type: integer, default: 10 }
+          max_bytes: { type: integer, default: 52428800 }
+          total_budget: { type: integer, default: 300000000 }
       code: |
         # Self-contained mirror of clip2trace.telegram_media + telegram_live
         # download_candidates. Dry-run by default (metadata only); bounded live
@@ -1207,7 +1210,15 @@ spec:
                         "downloaded": 0,
                         "diagnostics": ["telethon unavailable: %r" % (exc,)]}
 
-            max_media, max_bytes, total_budget = 5, 8000000, 80000000
+            # Tunable caps (raised defaults): news channels post large videos,
+            # so an 8 MB per-file cap silently skipped the real source posts.
+            # Safe to raise because each downloaded file is deleted right after
+            # phashing (peak /tmp = one file, not the sum). Override per call via
+            # max_bytes / max_media / total_budget.
+            max_media = int(input_data.get("max_media", 10) or 10)
+            max_bytes = int(input_data.get("max_bytes", 52428800) or 52428800)
+            total_budget = int(
+                input_data.get("total_budget", 300000000) or 300000000)
             inaccessible = ("ChannelPrivateError", "ChannelInvalidError",
                             "MsgIdInvalidError", "MediaEmptyError",
                             "FileIdInvalidError", "LocationInvalidError",

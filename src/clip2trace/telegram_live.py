@@ -26,9 +26,12 @@ MAX_PAGES_PER_QUERY = 5
 PAGE_LIMIT = 100
 
 # Media download bounds (Sinas containers: 100 MB /tmp, 512 MB RAM, 300 s).
-MAX_MEDIA = 5
-MAX_MEDIA_BYTES = 8_000_000  # per-file cap
-MAX_TMP_BUDGET = 80_000_000  # total bytes across a fetch (under 100 MB /tmp)
+MAX_MEDIA = 10
+# Per-file cap. Raised from 8 MB because news channels post large videos and an
+# 8 MB cap silently skipped the real source posts. Safe because each file is
+# deleted right after phashing (peak /tmp = one file, well under the 100 MB cap).
+MAX_MEDIA_BYTES = 52_428_800  # 50 MB per-file cap
+MAX_TMP_BUDGET = 300_000_000  # cumulative downloaded bytes across a fetch
 
 # Channel enumeration: how many recent messages to scan, and what counts as a
 # video. Telegram posts `.mkv` as a *document*, not a streamable video message,
