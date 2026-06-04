@@ -1,0 +1,58 @@
+error connecting to api.github.com
+check your internet connection or https://githubstatus.com
+146s chat=15056255-3aea-4628-b506-06f843cbcf6d
+============================================================
+All four stores written. Here is the complete pipeline report.
+
+---
+
+## 🔍 Clip2Trace — Provenance Report
+**Job:** `job_a4a1e8e3-45a8-46af-a4be-a74adcc2a2cb` | **Mode:** hybrid | **Status:** ✅ done
+
+---
+
+### 🎬 Input Video Analysis
+| Field | Value |
+|---|---|
+| File | `paris.mp4` |
+| Method | Shot detection (PyAV) |
+| Segments found | 1 |
+| Segment | `seg_001` — **0.00 s → 30.93 s** |
+| Phashes extracted | `827f319847479d3a`, `a1609e3e61c32eed`, `e71898755ec21673`, `e10cbe39d4c20fc7`, `a215b18a3d47877b`, `e22d9d3e1f8307c4` |
+| OCR text | *(OCR engine returned a prompt artefact — no readable on-screen text detected)* |
+| Clusters | 1 (single unitary segment — no repeated footage internally) |
+
+---
+
+### 📡 Corpus: `@meduzalive` (cached demo fixture)
+2 candidates recovered with full phashes from the fixture (the API response truncated after candidate 2; the remaining entries lacked phashes and could not be verified without fabricating data).
+
+| # | Candidate | Caption (Russian) |
+|---|---|---|
+| 1 | [`meduzalive_143136`](https://t.me/meduzalive/143136) | *«Удар по витрине путинизма. Как атаки на Петербург во время ПМЭФ демонстрируют слабость власти?»* |
+| 2 | [`meduzalive_143127`](https://t.me/meduzalive/143127) | *«В детском лагере под Нижним Тагилом установили памятник Дзержинскому»* |
+
+---
+
+### 🧮 Similarity Scores (from `verify_media_similarity`)
+| Candidate | Visual | Text | Temporal | **Overall** | Verdict |
+|---|---|---|---|---|---|
+| `meduzalive_143136` | 0.6562 | 0.00 | 0.8797 | 0.5257 | ❌ **Rejected** |
+| `meduzalive_143127` | 0.6562 | 0.00 | 0.8797 | 0.5257 | ❌ **Rejected** |
+
+---
+
+### 🏁 Ranking Result — No Confident Match
+
+Both candidates were **rejected** by `rank_source_candidates` (confidence = 0.0 for both). The `render_report` function confirmed `ranked_candidates: []`.
+
+**Why no match?**
+- **Visual score (0.6562):** Moderate — the phash sets share some structural similarity but no definitively matched keyframes (`matched_frames: []`). This is consistent with two unrelated Meduza-style videos that happen to share graphical templates (e.g. lower-thirds, channel branding).
+- **Text score (0.00):** The OCR pipeline returned no usable on-screen text from `paris.mp4`, so no caption/text overlap could be scored.
+- **Temporal score (0.8797):** Duration is close (~31 s vs ~30 s), but duration alone is insufficient evidence.
+- **Overall (0.5257):** Below the confidence threshold for any positive attribution.
+
+---
+
+### ⚠️ Caveats
+1. **Not a confirmed source.** No candidate reached the confidence threshold. This is a *null result*, not proof the video is 
