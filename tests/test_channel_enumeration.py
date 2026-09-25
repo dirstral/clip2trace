@@ -155,6 +155,50 @@ def test_live_path_actually_invokes_build_client(monkeypatch):
     assert "missing" in " ".join(out.get("diagnostics", [])).lower()
 
 
+def test_demo_mode_reads_fixture(monkeypatch):
+    """Demo mode + a channel + an access_token reads <channel>_corpus.json from
+    the demo-fixtures collection and returns its pre-phashed candidates (no live
+    Telegram). This is the flood-proof path used for the demo."""
+    import base64
+    import json as _json
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    fixture = {
+        "channel": "meduzalive",
+        "candidates": [
+            {"candidate_id": "meduzalive_143127", "phashes": ["a", "b"], "url": "u"}
+        ],
+    }
+    b64 = base64.b64encode(_json.dumps(fixture).encode()).decode()
+    seen = {}
+
+    def fake_get(url, timeout=None, headers=None):
+        seen["url"] = url
+        return SimpleNamespace(status_code=200, json=lambda: {"content_base64": b64})
+
+    fake_requests = ModuleType("requests")
+    fake_requests.get = fake_get
+    monkeypatch.setitem(sys.modules, "requests", fake_requests)
+
+    mod = _load("enumerate_channel_videos")
+    out = mod.handler(
+        {"channel": "meduzalive", "mode": "demo"},
+        {"access_token": "tok", "api_url": "https://x"},
+    )
+    assert out["status"] == "ok"
+    assert out["source"] == "demo_fixture"
+    assert out["candidates"][0]["candidate_id"] == "meduzalive_143127"
+    assert "demo-fixtures/meduzalive_corpus.json" in seen["url"]
+
+
+def test_demo_mode_no_token_is_demo_no_data():
+    """Without an access_token (e.g. local/test), demo mode degrades cleanly."""
+    mod = _load("enumerate_channel_videos")
+    out = mod.handler({"channel": "meduzalive", "mode": "demo"}, {})
+    assert out["status"] == "demo_no_data"
+
+
 def test_live_path_returns_client_candidates(monkeypatch):
     """A usable client's enumerate_channel results flow through as source=live."""
     import clip2trace.telegram_live as tl

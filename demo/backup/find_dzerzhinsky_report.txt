@@ -1,0 +1,97 @@
+--- attempt1: 126s | found 143127: True | chat_id=acd39507-d36d-4e2b-94cc-538e92a3c950
+All four stores written and the job is marked **done**. Here is the full provenance summary.
+
+---
+
+## 🎬 Clip2Trace — Provenance Report
+
+**Job:** `job_7ca628d4-103c-4e21-a353-58ddde163d1b` | Mode: **hybrid** | Input: `dzerzhinsky.mp4`
+
+---
+
+### Input video analysis
+| Segment | Timecode | OCR text | Phashes extracted |
+|---------|----------|----------|-------------------|
+| `seg_001` | 0.00 s – 20.94 s | `ПЕР` | 6 real phashes via `extract_segment_clues` |
+
+---
+
+### Candidate comparison (3 meduzalive corpus posts)
+
+| Rank | Candidate ID | t.me URL | Visual score | Overall score | Matched frames |
+|------|-------------|----------|:---:|:---:|:---:|
+| 🥇 1 | `meduzalive_143127` | https://t.me/meduzalive/143127 | **1.000** | 0.75 | 6/6 (≥ 0.9688 each) |
+| 2 | `meduzalive_143093` | https://t.me/meduzalive/143093 | 0.984 | 0.741 | 6/6 |
+| 3 | `meduzalive_143136` | https://t.me/meduzalive/143136 | 0.625 | 0.525 | 0/6 |
+
+---
+
+### 🔍 Most likely candidate
+
+> **https://t.me/meduzalive/143127**
+> Caption (ru): *«В детском лагере под Нижним Тагилом установили памятник Дзержинскому»*
+> Visual score: **1.000** (all 6 perceptual-hash frames matched at similarity ≥ 0.9688 against the input)
+> Overall score: **0.75**
+
+---
+
+### ⚠️ Mandatory caveats
+1. **This is a *likely candidate*, not a confirmed original source.** The matched post may itself be a repost or forward from an upstream channel.
+2. All scores are automated (perceptual-hash comparison); human visual verification of the actual Telegram post is required before drawing any conclusion.
+3. Text/OCR scoring was 0.0 for all candidates — the OCR fragment `ПЕР` was too short to discriminate; the ranking rests entirely on visual hash evidence.
+4. Private/deleted posts and channels outside the demo corpus are out of scope for this run.
+5. A timestamp comparison (post date vs. input video publication date) should be performed manually to assess chronological priority.
+======================================================================
+--- attempt2: 132s | found 143127: True | chat_id=4c3b2af7-043c-4320-ba73-1a5ee33ec484
+All four stores written. Here is the full provenance report.
+
+---
+
+## 🔍 Clip2Trace — Provenance Report
+
+**Job:** `job_53f5bcc3-f49d-47c8-a457-a4e3bde69db1` | **Mode:** hybrid | **Input:** `dzerzhinsky.mp4`
+
+---
+
+### 📹 Input Segmentation
+| Segment | Timecodes | OCR text | Phashes |
+|---------|-----------|----------|---------|
+| `seg_001` | 0.00 s – 20.94 s | `ПЕР` | `d81b37a6…`, `dc18a969…`, `dd2a33b3…`, `cb4c347a…`, `d12bb2b4…`, `da15ab26…` |
+
+---
+
+### 📊 Candidate Scoring (all 3 meduzalive corpus posts)
+
+| Rank | Candidate ID | URL | Visual | Text | Temporal | Overall | Frames matched |
+|------|-------------|-----|--------|------|----------|---------|----------------|
+| 🥇 1 | `meduzalive_143127` | https://t.me/meduzalive/143127 | **1.00** | 0.00 | 1.00 | **0.75** | 6/6 (avg ≥0.97) |
+| 2 | `meduzalive_143136` | https://t.me/meduzalive/143136 | 0.625 | 0.00 | 1.00 | 0.525 | 0/6 |
+| 3 | `meduzalive_143093` | https://t.me/meduzalive/143093 | 0.625 | 0.00 | 1.00 | 0.525 | 0/6 |
+
+---
+
+### 🏆 Most Likely Candidate
+
+> **⚠️ Likely candidate only — this is not a claim of original authorship.**
+
+| Field | Value |
+|-------|-------|
+| **URL** | **https://t.me/meduzalive/143127** |
+| **Caption** | *«В детском лагере под Нижним Тагилом установили памятник Дзержинскому»* ("A bust of Dzerzhinsky was unveiled at a children's camp near Nizhny Tagil") |
+| **Visual score** | **1.00** — all 6 perceptual-hash frames matched at similarity ≥ 0.969 |
+| **Overall score** | **0.75** |
+| **Confidence label** | `likely` |
+
+---
+
+### ⚠️ Mandatory Caveats
+1. **Not proof of origin.** The matched Telegram post may itself be a repost or forward from another account or platform.
+2. **Automated scores only.** Perceptual-hash similarity is a signal, not a legal determination. Manual visual confirmation is required.
+3. **Text score = 0.00** because the OCR captured only the partial string `ПЕР` (too short for a meaningful text match against the caption).
+4. **Private/deleted posts** and posts outside the demo corpus are out of scope and have not been checked.
+
+### ✅ Recommended Next Steps
+- Open https://t.me/meduzalive/143127 and visually confirm the footage matches your input clip.
+- Check whether that post is marked as a forward, and if so trace the forward chain.
+- Compare the post's timestamp against the first known appearance of your clip on other platforms.
+======================================================================
