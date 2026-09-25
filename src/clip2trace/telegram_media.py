@@ -46,14 +46,17 @@ def fetch_candidate_media(
     *,
     dry_run: bool = True,
     live_client=None,
-    max_media: int = 5,
-    max_bytes: int = 8_000_000,
+    max_media: int = 10,
+    max_bytes: int = 52_428_800,
+    total_budget: int = 300_000_000,
 ) -> Dict:
     """Fetch metadata for candidates; optionally download bounded media.
 
     In dry_run (default) we only normalise metadata. On a live download we cap
-    both the number of items (`max_media`) and per-file size (`max_bytes`) to
-    respect the 100 MB /tmp limit of Sinas function containers.
+    the number of items (`max_media`), per-file size (`max_bytes`), and the total
+    downloaded bytes (`total_budget`). Each file is deleted right after phashing,
+    so peak /tmp is a single file — the per-file cap (default 50 MB) is what must
+    stay under the 100 MB container limit, not the sum.
     """
     normalised = [normalise_candidate(c) for c in candidates]
     diagnostics: List[str] = []
@@ -72,7 +75,10 @@ def fetch_candidate_media(
     # while enforcing per-file + total-/tmp byte budgets.
     if hasattr(live_client, "download_candidates"):
         res = live_client.download_candidates(
-            normalised, max_media=max_media, max_bytes=max_bytes
+            normalised,
+            max_media=max_media,
+            max_bytes=max_bytes,
+            total_budget=total_budget,
         )
         return {
             "status": "ok",

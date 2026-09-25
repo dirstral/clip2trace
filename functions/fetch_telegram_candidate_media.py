@@ -14,6 +14,9 @@ def handler(input_data, context):
     context = context or {}
     candidates = input_data.get("candidates") or []
     dry_run = input_data.get("dry_run", True)
+    max_media = int(input_data.get("max_media", 10) or 10)
+    max_bytes = int(input_data.get("max_bytes", 52_428_800) or 52_428_800)
+    total_budget = int(input_data.get("total_budget", 300_000_000) or 300_000_000)
 
     live_client = None
     if not dry_run:
@@ -28,7 +31,12 @@ def handler(input_data, context):
         from clip2trace.telegram_media import fetch_candidate_media
 
         return fetch_candidate_media(
-            candidates, dry_run=dry_run, live_client=live_client
+            candidates,
+            dry_run=dry_run,
+            live_client=live_client,
+            max_media=max_media,
+            max_bytes=max_bytes,
+            total_budget=total_budget,
         )
     except Exception as exc:
         # Self-contained metadata-only fallback (mirrors the inline YAML block).
